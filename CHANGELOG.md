@@ -1,0 +1,11 @@
+# Changelog
+
+## [1.0.1](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.0.0...billiard-stock-web-v1.0.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* correction in releases ([c5aeed1](https://github.com/geynerson003/billiar-stock-web/commit/c5aeed1dd236ad04bacb092cb3f201020b4dfde5))
+* correction releases ([398ffe2](https://github.com/geynerson003/billiar-stock-web/commit/398ffe27558c0b586a1016f95001028e111a6bf3))
+* define _APP_VERSION_ in vite config ([31cb248](https://github.com/geynerson003/billiar-stock-web/commit/31cb2487cd3b8089275db575c0ce9bd01ad0a034))
+* releases correction ([2b08ef4](https://github.com/geynerson003/billiar-stock-web/commit/2b08ef4fa8751e7bd99c4530deb5d3b23dc06cae))

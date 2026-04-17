@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.2.0...billiard-stock-web-v1.3.0) (2026-04-17)
+
+
+### Features
+
+* **pwa:** implement robust service worker update strategy with Workbox ([437d20a](https://github.com/geynerson003/billiar-stock-web/commit/437d20a2d58dccf21688ed17e5d067613a7429e4))
+* **pwa:** implement robust service worker update strategy with Workbox ([b5de43e](https://github.com/geynerson003/billiar-stock-web/commit/b5de43e95040ead291b7ecd0bb3c5f4d57589a8b))
+
 ## [1.2.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.1.0...billiard-stock-web-v1.2.0) (2026-04-17)
 
 

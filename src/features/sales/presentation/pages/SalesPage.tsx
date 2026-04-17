@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Modal, PageHeader, Panel, useConfirmDialog } from "../../../../shared/components";
 import { useAuth, useLiveCollection, useToast } from "../../../../shared/hooks";
-import type { Sale, SaleItem, SaleType } from "../../../../shared/types";
+import type { ReportFilter, ReportType, Sale, SaleItem, SaleType } from "../../../../shared/types";
 import {
   addSale,
   businessCollection,
@@ -12,7 +12,7 @@ import {
   mapSale,
   mapTable,
 } from "../../../../shared/services/firebase/business.service";
-import { calculateProfitForDraftItems, getSaleAmount } from "../../../../shared/utils/financial";
+import { calculateProfitForDraftItems, getDateRange, getSaleAmount } from "../../../../shared/utils/financial";
 import { formatCurrency, formatDate } from "../../../../shared/utils/format";
 
 type SaleDraft = {
@@ -41,6 +41,10 @@ export function SalesPage() {
   const isViewing = viewedSale !== null;
   const [confirmDialog, confirm] = useConfirmDialog();
 
+  const [filterType, setFilterType] = useState<ReportType>("DAILY");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
   const products = useLiveCollection(
     () => (userId ? businessCollection(userId, "products") : null),
     [userId],
@@ -62,9 +66,20 @@ export function SalesPage() {
     mapSale
   );
 
+  const filter: ReportFilter = useMemo(
+    () => ({
+      type: filterType,
+      startDate: startDate ? new Date(startDate).getTime() : undefined,
+      endDate: endDate ? new Date(endDate).getTime() + 86_399_999 : undefined,
+    }),
+    [endDate, filterType, startDate]
+  );
+
   const filteredSales = useMemo(
-    () =>
-      sales.data
+    () => {
+      const range = getDateRange(filter);
+      return sales.data
+        .filter((sale) => sale.date >= range.start && sale.date <= range.end)
         .filter((sale) => {
           const clientName =
             clients.data.find((client) => client.id === sale.clientId)?.nombre ?? "";
@@ -76,8 +91,9 @@ export function SalesPage() {
             .toLowerCase()
             .includes(search.toLowerCase());
         })
-        .sort((a, b) => b.date - a.date),
-    [clients.data, sales.data, search, tables.data]
+        .sort((a, b) => b.date - a.date);
+    },
+    [clients.data, filter, sales.data, search, tables.data]
   );
 
   const totalDraft = items.reduce((sum, item) => sum + item.totalPrice, 0);
@@ -222,6 +238,33 @@ export function SalesPage() {
           </div>
         }
       />
+
+      <Panel title="Filtros">
+        <div className="filter-grid">
+          <label className="field">
+            <span>Tipo</span>
+            <select value={filterType} onChange={(event) => setFilterType(event.target.value as ReportType)}>
+              <option value="DAILY">Diario</option>
+              <option value="WEEKLY">Semanal</option>
+              <option value="MONTHLY">Mensual</option>
+              <option value="CUSTOM">Personalizado</option>
+            </select>
+          </label>
+
+          {filterType === "CUSTOM" && (
+            <>
+              <label className="field">
+                <span>Fecha inicio</span>
+                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Fecha fin</span>
+                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
+            </>
+          )}
+        </div>
+      </Panel>
 
       <Panel title="Historial reciente" subtitle={`${filteredSales.length} ventas`}>
         <div className="stack-list">

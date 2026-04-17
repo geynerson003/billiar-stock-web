@@ -139,7 +139,7 @@ function getOutstandingDebtFallback(sales: Sale[]): Map<string, number> {
   return debtByClient;
 }
 
-function getDateRange(filter: ReportFilter): { start: number; end: number } {
+export function getDateRange(filter: ReportFilter): { start: number; end: number } {
   const now = new Date();
   const cursor = new Date(now);
 

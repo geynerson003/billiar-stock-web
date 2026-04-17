@@ -8,7 +8,8 @@ import {
   addParticipantsToGame,
   businessCollection,
   createGame,
-  finishGame,
+  restartGame,
+  finishTableSession,
   mapClient,
   mapGame,
   mapProduct,
@@ -29,8 +30,11 @@ export function GameRoomPage() {
   const [participantModal, setParticipantModal] = useState(false);
   const [betModal, setBetModal] = useState(false);
   const [finishModal, setFinishModal] = useState(false);
+  const [restartModal, setRestartModal] = useState(false);
+  const [historyModal, setHistoryModal] = useState(false);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
   const [selectedLosers, setSelectedLosers] = useState<string[]>([]);
+  const [selectedRestartLosers, setSelectedRestartLosers] = useState<string[]>([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [betQuantityDraft, setBetQuantityDraft] = useState("1");
   const [isPaid, setIsPaid] = useState(false);
@@ -69,10 +73,9 @@ export function GameRoomPage() {
   );
 
   const table = tables.data.find((entry) => entry.id === tableId);
-  const currentGame =
-    games.data.find(
-      (game) => game.sessionId === sessionId && game.tableId === tableId && game.status === "ACTIVE"
-    ) ?? null;
+  const sessionGames = games.data.filter((game) => game.sessionId === sessionId && game.tableId === tableId);
+  const currentGame = sessionGames.find((game) => game.status === "ACTIVE") ?? null;
+  const historyGames = sessionGames.filter((game) => game.status === "FINISHED").sort((a,b) => a.startTime - b.startTime);
 
   const totalAmount = currentGame ? calculateGameTotal(currentGame) : table?.pricePerGame ?? 0;
 
@@ -144,16 +147,30 @@ export function GameRoomPage() {
     setBetModal(false);
   }
 
-  async function closeGame() {
+  async function handleRestartGame() {
     if (!userId || !currentGame) return;
 
-    if (currentGame.participants.length > 0 && selectedLosers.length === 0) {
-      toast("warning", "Marca al menos un perdedor");
+    if (currentGame.participants.length > 0 && selectedRestartLosers.length === 0) {
+      toast("warning", "Marca al menos un perdedor para reiniciar la ronda");
       return;
     }
 
-    await finishGame(userId, currentGame, selectedLosers, isPaid, products.data);
-    toast("success", "Partida finalizada");
+    await restartGame(userId, currentGame, selectedRestartLosers);
+    toast("success", "Partida reiniciada");
+    setSelectedRestartLosers([]);
+    setRestartModal(false);
+  }
+
+  async function closeSession() {
+    if (!userId) return;
+
+    if (currentGame && currentGame.participants.length > 0 && selectedLosers.length === 0) {
+      toast("warning", "Marca al menos un perdedor para la ronda actual");
+      return;
+    }
+
+    await finishTableSession(userId, sessionGames, currentGame?.id ?? "", selectedLosers, isPaid, products.data, tableId, sessionId);
+    toast("success", "Mesa finalizada cobrando todas las rondas");
     setSelectedLosers([]);
     setIsPaid(false);
     setFinishModal(false);
@@ -184,6 +201,12 @@ export function GameRoomPage() {
               </button>
               <button className="button button--secondary" onClick={() => setBetModal(true)} type="button">
                 Agregar apuesta
+              </button>
+              <button className="button button--secondary" onClick={() => setHistoryModal(true)} type="button">
+                Historial
+              </button>
+              <button className="button button--secondary" onClick={() => setRestartModal(true)} type="button">
+                Reiniciar
               </button>
               <button className="button button--primary" onClick={() => setFinishModal(true)} type="button">
                 Finalizar
@@ -336,11 +359,79 @@ export function GameRoomPage() {
         </div>
       </Modal>
 
-      <Modal open={finishModal} title="Finalizar partida" onClose={() => setFinishModal(false)}>
+      <Modal open={restartModal} title="Reiniciar partida" onClose={() => setRestartModal(false)}>
         <div className="form-grid">
           {finishCandidates.length > 0 && (
             <div className="field field--full">
-              <span>Selecciona los perdedores</span>
+              <span>Selecciona los perdedores de esta ronda</span>
+              <div className="checkbox-list" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                {finishCandidates.map((participant) => (
+                  <label className="check-row" key={participant.clientId}>
+                    <input
+                      checked={selectedRestartLosers.includes(participant.clientId)}
+                      onChange={(event) =>
+                        setSelectedRestartLosers((current) =>
+                          event.target.checked
+                            ? [...current, participant.clientId]
+                            : current.filter((id) => id !== participant.clientId)
+                        )
+                      }
+                      type="checkbox"
+                    />
+                    <span>{participant.clientName}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="modal__footer">
+          <button className="button button--secondary" onClick={() => setRestartModal(false)} type="button">
+            Cancelar
+          </button>
+          <button className="button button--primary" onClick={() => void handleRestartGame()} type="button">
+            Reiniciar partida
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={historyModal} title="Historial de la mesa" onClose={() => setHistoryModal(false)}>
+        <div className="stack-list">
+          {historyGames.length === 0 ? (
+            <div className="empty-state">No hay partidas en el historial.</div>
+          ) : (
+            historyGames.map((game, idx) => (
+              <div key={game.id} className="list-row">
+                 <div>
+                   <strong>Ronda {idx + 1}</strong>
+                   <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                     Perdedores: {game.loserIds.length > 0 ? game.loserIds.map(id => clients.data.find(c => c.id === id)?.nombre ?? "Desconocido").join(", ") : "Todos pagarán (o dividido)"}
+                   </span>
+                 </div>
+                 <strong>{formatCurrency(game.totalAmount)}</strong>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="modal__footer">
+          <button className="button button--secondary" onClick={() => setHistoryModal(false)} type="button">
+            Cerrar
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={finishModal} title="Finalizar sesión" onClose={() => setFinishModal(false)}>
+        <div className="form-grid">
+          {currentGame && (
+            <div className="list-row" style={{ padding: '0.5rem 0', background: 'transparent' }}>
+              <span>Total a facturar (Historial + Ronda actual)</span>
+              <strong>{formatCurrency(historyGames.reduce((acc, g) => acc + g.totalAmount, 0) + totalAmount)}</strong>
+            </div>
+          )}
+          {finishCandidates.length > 0 && (
+            <div className="field field--full">
+              <span>Selecciona los perdedores de la ronda actual final</span>
               <div className="checkbox-list" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                 {finishCandidates.map((participant) => (
                   <label className="check-row" key={participant.clientId}>
@@ -364,7 +455,7 @@ export function GameRoomPage() {
 
           <label className="toggle">
             <input checked={isPaid} onChange={(event) => setIsPaid(event.target.checked)} type="checkbox" />
-            <span>Marcar partida como pagada</span>
+            <span>Marcar todas las rondas de la sesión como pagadas</span>
           </label>
         </div>
 
@@ -372,8 +463,8 @@ export function GameRoomPage() {
           <button className="button button--secondary" onClick={() => setFinishModal(false)} type="button">
             Cancelar
           </button>
-          <button className="button button--primary" onClick={() => void closeGame()} type="button">
-            Finalizar partida
+          <button className="button button--primary" onClick={() => void closeSession()} type="button">
+            Finalizar mesa
           </button>
         </div>
       </Modal>

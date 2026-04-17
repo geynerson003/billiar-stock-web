@@ -165,7 +165,7 @@ export function TablesPage() {
                   <strong>{table.name}</strong>
                   <span>{formatCurrency(table.pricePerGame)} por partida</span>
                 </div>
-                <span className={`badge ${hasActiveGame ? "badge--danger" : table.currentSessionId ? "" : "badge--success"}`}>
+                <span className={`badge ${hasActiveGame ? "badge--danger" : table.currentSessionId ? "badge--success" : ""}`}>
                   {hasActiveGame ? "En partida" : table.currentSessionId ? "Mesa disponible" : " No disponible"}
                 </span>
               </div>

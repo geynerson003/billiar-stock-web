@@ -673,31 +673,76 @@ export async function removeBetFromGame(
   });
 }
 
-export async function finishGame(
+export async function restartGame(
   userId: string,
   game: Game,
-  loserIds: string[],
-  isPaid: boolean,
-  products: Product[]
+  loserIds: string[]
 ): Promise<void> {
   const totalAmount =
     game.pricePerGame + game.bets.reduce((sum, bet) => sum + bet.totalPrice, 0);
   const amountPerLoser = loserIds.length > 0 ? totalAmount / loserIds.length : 0;
 
-  const updatedGame: Game = {
+  const finishedGame: Game = {
     ...game,
     loserIds,
-    isPaid,
+    isPaid: false,
     status: "FINISHED",
     totalAmount,
     amountPerLoser,
     endTime: Date.now()
   };
 
-  const sales = prepareGameSales(updatedGame, products);
+  const newGameRef = doc(businessCollection(userId, "games"));
+  const newGame: Game = {
+    ...game,
+    id: newGameRef.id,
+    startTime: Date.now(),
+    endTime: null,
+    loserIds: [],
+    amountPerLoser: 0,
+    isPaid: false,
+    status: "ACTIVE",
+    totalAmount: 0,
+    participants: [...game.participants],
+    bets: [...game.bets]
+  };
 
   await runTransaction(db, async (transaction) => {
-    // === FASE 1: TODAS LAS LECTURAS ===
+    transaction.set(doc(db, "businesses", userId, "games", finishedGame.id), finishedGame);
+    transaction.set(newGameRef, newGame);
+  });
+}
+
+export async function finishTableSession(
+  userId: string,
+  sessionGames: Game[],
+  activeGameId: string,
+  activeGameLosers: string[],
+  isPaid: boolean,
+  products: Product[],
+  tableId: string,
+  sessionId: string
+): Promise<void> {
+  const finalizedGames = sessionGames.map((game) => {
+    if (game.id === activeGameId) {
+      const totalAmount = game.pricePerGame + game.bets.reduce((sum, bet) => sum + bet.totalPrice, 0);
+      const amountPerLoser = activeGameLosers.length > 0 ? totalAmount / activeGameLosers.length : 0;
+      return {
+        ...game,
+        loserIds: activeGameLosers,
+        isPaid,
+        status: "FINISHED" as const,
+        totalAmount,
+        amountPerLoser,
+        endTime: Date.now()
+      };
+    }
+    return { ...game, isPaid };
+  });
+
+  const sales = finalizedGames.flatMap((g) => prepareGameSales(g, products));
+
+  await runTransaction(db, async (transaction) => {
     const readData: {
       products: Map<string, { ref: ReturnType<typeof doc>; stock: number; units: number }>;
       clients: Map<
@@ -709,7 +754,6 @@ export async function finishGame(
       clients: new Map()
     };
 
-    // Leer todos los productos que necesitamos actualizar
     for (const sale of sales) {
       for (const item of sale.items) {
         if (!readData.products.has(item.productId)) {
@@ -724,7 +768,6 @@ export async function finishGame(
       }
     }
 
-    // Leer todos los clientes que necesitamos actualizar
     for (const sale of sales) {
       if (!sale.isPaid && sale.clientId && !readData.clients.has(sale.clientId)) {
         const clientRef = doc(db, "businesses", userId, "clients", sale.clientId);
@@ -738,24 +781,18 @@ export async function finishGame(
       }
     }
 
-    // === FASE 2: TODAS LAS ESCRITURAS ===
-    const gameRef = doc(db, "businesses", userId, "games", game.id);
-    const tableRef = doc(db, "businesses", userId, "tables", game.tableId);
-    const sessionRef = doc(db, "businesses", userId, "table_sessions", game.sessionId);
-
-    // Escribir el juego finalizado
-    transaction.set(gameRef, updatedGame);
+    for (const game of finalizedGames) {
+      transaction.set(doc(db, "businesses", userId, "games", game.id), game);
+    }
 
     const createdSaleIds: string[] = [];
 
-    // Escribir ventas y actualizar inventario
     for (const saleDraft of sales) {
       const saleRef = doc(businessCollection(userId, "sales"));
       const sale: Sale = { ...saleDraft, id: saleRef.id };
       transaction.set(saleRef, saleToFirestore(sale));
       createdSaleIds.push(sale.id);
 
-      // Actualizar stock de productos
       for (const item of sale.items) {
         const productData = readData.products.get(item.productId);
         if (productData) {
@@ -766,7 +803,6 @@ export async function finishGame(
         }
       }
 
-      // Actualizar deuda de cliente
       if (!sale.isPaid && sale.clientId) {
         const clientData = readData.clients.get(sale.clientId);
         if (clientData) {
@@ -783,9 +819,19 @@ export async function finishGame(
       }
     }
 
-    // La sesión general de la mesa se mantiene abierta para marcar la mesa cómo disponible
-    // transaction.update(sessionRef, ...);
-    // transaction.update(tableRef, { currentSessionId: null });
+    transaction.update(doc(db, "businesses", userId, "table_sessions", sessionId), { endTime: Date.now() });
+
+    const newSessionRef = doc(businessCollection(userId, "table_sessions"));
+    transaction.set(newSessionRef, {
+      id: newSessionRef.id,
+      tableId,
+      startTime: Date.now(),
+      endTime: null,
+      sales: [],
+      total: 0
+    });
+
+    transaction.update(doc(db, "businesses", userId, "tables", tableId), { currentSessionId: newSessionRef.id });
   });
 }
 

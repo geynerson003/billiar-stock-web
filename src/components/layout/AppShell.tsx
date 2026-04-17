@@ -107,7 +107,7 @@ export function AppShell() {
       {/* ── Mobile Header ── */}
       <header className="mobile-header">
         <div className="mobile-header__brand">
-          <div className="brand__badge">BS</div>
+          <img src="/icons/navbar-icon-32x32.png" alt="Logo" style={{ width: '44px', height: '44px', borderRadius: '50%', objectFit: 'cover' }} />
           <strong>Billiard Stock</strong>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -141,7 +141,7 @@ export function AppShell() {
       {/* ── Sidebar / Drawer ── */}
       <aside className={`sidebar ${drawerOpen ? "sidebar--open" : ""}`}>
         <div className="brand">
-          <div className="brand__badge">BS</div>
+          <img src="/icons/navbar-icon-32x32.png" alt="Logo" style={{ width: '44px', height: '44px', borderRadius: '50%', objectFit: 'cover' }} />
           <div>
             <strong>Billiard Stock</strong>
             <span>Control total del negocio</span>

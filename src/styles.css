@@ -45,7 +45,7 @@
   --muted: #6b7280;
 
   /* Sidebar */
-  --sidebar-bg: rgba(11, 18, 34, 0.96);
+  --sidebar-bg: rgb(0, 0, 0);
   --sidebar-width: 272px;
 
   /* Shadows & Effects */

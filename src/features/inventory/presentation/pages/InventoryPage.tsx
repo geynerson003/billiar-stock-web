@@ -31,6 +31,7 @@ type ProductDraft = {
   minStock: string;
   saleBasketPrice: string;
   unitsPerPackage: string;
+  existingStock: number;
 };
 
 const blankProductDraft: ProductDraft = {
@@ -42,33 +43,34 @@ const blankProductDraft: ProductDraft = {
   minStock: "0",
   saleBasketPrice: "",
   unitsPerPackage: "1",
+  existingStock: 0,
 };
 
 function productToDraft(product: Product): ProductDraft {
   const unitsPerPackage = Math.max(product.unitsPerPackage, 1);
-  const packageQuantity = Math.round(product.stock / unitsPerPackage);
 
   return {
     id: product.id,
     name: product.name,
-    packageQuantity: String(packageQuantity),
+    packageQuantity: "0",
     supplierPrice: String(product.supplierPrice),
     salePrice: String(product.salePrice),
     minStock: String(product.minStock),
     saleBasketPrice: product.saleBasketPrice != null ? String(product.saleBasketPrice) : "",
-    unitsPerPackage: String(product.unitsPerPackage),
+    unitsPerPackage: String(unitsPerPackage),
+    existingStock: product.stock,
   };
 }
 
 function draftToProduct(draft: ProductDraft): Product {
   const unitsPerPackage = Number(draft.unitsPerPackage || 1);
   const packageQuantity = Number(draft.packageQuantity || 0);
-  const calculatedStock = packageQuantity * unitsPerPackage;
+  const addedStock = packageQuantity * unitsPerPackage;
 
   return {
     id: draft.id,
     name: draft.name.trim(),
-    stock: calculatedStock,
+    stock: draft.existingStock + addedStock,
     supplierPrice: Number(draft.supplierPrice || 0),
     salePrice: Number(draft.salePrice || 0),
     minStock: Number(draft.minStock || 0),
@@ -83,6 +85,8 @@ export function InventoryPage() {
   const userId = user?.uid;
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [draft, setDraft] = useState<ProductDraft>(blankProductDraft);
   const [confirmDialog, confirm] = useConfirmDialog();
 
@@ -108,6 +112,11 @@ export function InventoryPage() {
   function openEdit(product: Product) {
     setDraft(productToDraft(product));
     setModalOpen(true);
+  }
+
+  function openDetails(product: Product) {
+    setSelectedProduct(product);
+    setDetailsModalOpen(true);
   }
 
   function closeModal() {
@@ -207,7 +216,12 @@ export function InventoryPage() {
           )}
 
           {filteredProducts.map((product) => (
-            <article className="catalog-card" key={product.id}>
+            <article 
+              className="catalog-card catalog-card--interactive" 
+              key={product.id}
+              onClick={() => openDetails(product)}
+              style={{ cursor: "pointer" }}
+            >
               <div className="catalog-card__top">
                 <div>
                   <strong>{product.name}</strong>
@@ -232,7 +246,7 @@ export function InventoryPage() {
                 )}
               </div>
 
-              <div className="inline-actions">
+              <div className="inline-actions" onClick={(e) => e.stopPropagation()}>
                 <button className="button button--secondary" onClick={() => openEdit(product)} type="button">
                   Editar
                 </button>
@@ -261,11 +275,10 @@ export function InventoryPage() {
           </label>
 
           <label className="field">
-            <span>Cantidad de paquetes</span>
+            <span>Cantidad de paquetes a agregar (stock nuevo)</span>
             <input
               required
               type="number"
-              min="0"
               value={draft.packageQuantity}
               onFocus={() => handleNumberFocus("packageQuantity", "0")}
               onBlur={() => handleNumberBlur("packageQuantity", "0")}
@@ -274,14 +287,14 @@ export function InventoryPage() {
           </label>
 
           <label className="field">
-            <span>Stock calculado</span>
+            <span>Stock resultante calculado</span>
             <input
               type="number"
               min="0"
-              value={Number(draft.packageQuantity || 0) * Number(draft.unitsPerPackage || 1)}
+              value={draft.existingStock + (Number(draft.packageQuantity || 0) * Number(draft.unitsPerPackage || 1))}
               disabled
               readOnly
-              title="El stock se calcula automaticamente: cantidad de paquetes por unidades por paquete"
+              title="Stock que existía + (Nuevos paquetes x Unidades)"
             />
           </label>
 
@@ -365,6 +378,63 @@ export function InventoryPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={detailsModalOpen} title="Detalles Financieros del Producto" onClose={() => setDetailsModalOpen(false)}>
+        {selectedProduct && (() => {
+          const p = selectedProduct;
+          const uxp = Math.max(p.unitsPerPackage, 1);
+          
+          const costoUnidad = p.supplierPrice / uxp;
+          const gananciaUnidad = p.salePrice - costoUnidad;
+          const margenUnidad = p.salePrice > 0 ? (gananciaUnidad / p.salePrice) * 100 : 0;
+
+          const ventaPaquete = p.saleBasketPrice ?? (p.salePrice * uxp);
+          const gananciaPaquete = ventaPaquete - p.supplierPrice;
+          const margenPaquete = ventaPaquete > 0 ? (gananciaPaquete / ventaPaquete) * 100 : 0;
+
+          const valorProveedor = p.stock * costoUnidad;
+          const valorVenta = p.stock * p.salePrice;
+          const gananciaPotencial = valorVenta - valorProveedor;
+
+          return (
+            <div className="form-grid" style={{ gap: '1.5rem', maxHeight: '70vh', overflowY: 'auto', paddingRight: '4px' }}>
+              <div>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>CÁLCULOS POR UNIDAD</h4>
+                <div className="stack-list">
+                   <div className="list-row"><span>Precio proveedor por unidad</span><strong>{formatCurrency(costoUnidad)}</strong></div>
+                   <div className="list-row"><span>Ganancia por unidad</span><strong>{formatCurrency(gananciaUnidad)}</strong></div>
+                   <div className="list-row"><span>Margen de ganancia por unidad</span><strong>{margenUnidad.toFixed(1)}%</strong></div>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>CÁLCULOS POR PAQUETE/CANASTA</h4>
+                <div className="stack-list">
+                   <div className="list-row"><span>Ganancia por paquete</span><strong>{formatCurrency(gananciaPaquete)}</strong></div>
+                   <div className="list-row"><span>Margen de ganancia por paquete</span><strong>{margenPaquete.toFixed(1)}%</strong></div>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>VALORES DEL INVENTARIO</h4>
+                <div className="stack-list">
+                   <div className="list-row"><span>Valor al precio del proveedor</span><strong>{formatCurrency(valorProveedor)}</strong></div>
+                   <div className="list-row"><span>Valor al precio de venta</span><strong>{formatCurrency(valorVenta)}</strong></div>
+                   <div className="list-row" style={{ marginTop: 8, borderTop: '1px solid var(--panel-border)', paddingTop: 8 }}>
+                     <span>Ganancia potencial total</span>
+                     <strong style={{ color: 'var(--green)' }}>{formatCurrency(gananciaPotencial)}</strong>
+                   </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        <div className="modal__footer" style={{ marginTop: '1.5rem' }}>
+          <button className="button button--secondary" onClick={() => setDetailsModalOpen(false)} type="button">
+            Cerrar
+          </button>
+        </div>
       </Modal>
     </div>
   );

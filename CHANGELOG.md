@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.0.1...billiard-stock-web-v1.1.0) (2026-04-17)
+
+
+### Features
+
+* filter in sales page ([0e3180c](https://github.com/geynerson003/billiar-stock-web/commit/0e3180c1603cfebba7375b925da0b5b4607dd121))
+* filter in sales page ([68af558](https://github.com/geynerson003/billiar-stock-web/commit/68af558beb4f848ae86c6d6253a4efab86f7e850))
+
 ## [1.0.1](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.0.0...billiard-stock-web-v1.0.1) (2026-04-16)
 
 

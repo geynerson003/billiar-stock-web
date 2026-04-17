@@ -11,7 +11,23 @@ export default defineConfig({
     react(),
 
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
+
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: false,
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === "navigate",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "html-navigate-cache",
+              networkTimeoutSeconds: 3,
+            },
+          },
+        ],
+      },
 
       manifest: {
         id: "/",

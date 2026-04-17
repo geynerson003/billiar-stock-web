@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth, usePWAInstall } from "../../shared/hooks";
+import { ReloadPrompt } from "../../shared/components/common";
 
 /* ── SVG Icons (inline for zero-dependency, tree-shakeable) ── */
 const icons = {
@@ -202,6 +203,8 @@ export function AppShell() {
           </NavLink>
         ))}
       </nav>
+
+      <ReloadPrompt />
     </div>
   );
 }

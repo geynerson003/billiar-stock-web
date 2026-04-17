@@ -9,7 +9,25 @@ export default defineConfig({
     plugins: [
         react(),
         VitePWA({
-            registerType: "autoUpdate",
+            registerType: "prompt",
+            workbox: {
+                cleanupOutdatedCaches: true,
+                clientsClaim: true,
+                skipWaiting: false,
+                runtimeCaching: [
+                    {
+                        urlPattern: function (_a) {
+                            var request = _a.request;
+                            return request.mode === "navigate";
+                        },
+                        handler: "NetworkFirst",
+                        options: {
+                            cacheName: "html-navigate-cache",
+                            networkTimeoutSeconds: 3,
+                        },
+                    },
+                ],
+            },
             manifest: {
                 id: "/",
                 name: "Billiard Stock — Control Total del Negocio",

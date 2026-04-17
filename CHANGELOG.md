@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.1.0...billiard-stock-web-v1.2.0) (2026-04-17)
+
+
+### Features
+
+* game history and restart ([e0aebce](https://github.com/geynerson003/billiar-stock-web/commit/e0aebce3375f57a2eeb63ff20a43038bfeea671a))
+* game history and restart ([71f3818](https://github.com/geynerson003/billiar-stock-web/commit/71f3818d2b187cb35a6754c555758c6d209c85c3))
+
 ## [1.1.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.0.1...billiard-stock-web-v1.1.0) (2026-04-17)
 
 

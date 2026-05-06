@@ -313,131 +313,133 @@ export function SalesPage() {
       </Panel>
 
       <Modal open={modalOpen} title={isViewing ? "Detalles de la venta" : "Registrar venta"} onClose={closeModal}>
-        <form className="form-grid" onSubmit={saveSale}>
-          <div className="form-grid field--full">
-            <label className="field">
-              <span>Tipo de venta</span>
-              <select value={saleType} onChange={(event) => setSaleType(event.target.value as SaleType)} disabled={isViewing}>
-                <option value="EXTERNAL">Externa</option>
-                <option value="TABLE">Por mesa</option>
-              </select>
-            </label>
-
-            {saleType === "TABLE" && (
+        <form onSubmit={saveSale} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          <div className="form-grid" style={{ maxHeight: "70vh", overflowY: "auto", paddingRight: "4px" }}>
+            <div className="form-grid field--full">
               <label className="field">
-                <span>Mesa</span>
-                <select value={tableId} onChange={(event) => setTableId(event.target.value)} required disabled={isViewing}>
-                  <option value="">Selecciona una mesa</option>
-                  {tables.data.map((table) => (
-                    <option key={table.id} value={table.id}>
-                      {table.name}
+                <span>Tipo de venta</span>
+                <select value={saleType} onChange={(event) => setSaleType(event.target.value as SaleType)} disabled={isViewing}>
+                  <option value="EXTERNAL">Externa</option>
+                  <option value="TABLE">Por mesa</option>
+                </select>
+              </label>
+
+              {saleType === "TABLE" && (
+                <label className="field">
+                  <span>Mesa</span>
+                  <select value={tableId} onChange={(event) => setTableId(event.target.value)} required disabled={isViewing}>
+                    <option value="">Selecciona una mesa</option>
+                    {tables.data.map((table) => (
+                      <option key={table.id} value={table.id}>
+                        {table.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <label className="field">
+                <span>Cliente</span>
+                <select value={clientId} onChange={(event) => setClientId(event.target.value)} disabled={isViewing}>
+                  <option value="">Sin cliente</option>
+                  {clients.data.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.nombre}
                     </option>
                   ))}
                 </select>
               </label>
+
+              <label className={saleType === "EXTERNAL" ? "field field--full" : "field"}>
+                <span>Estado</span>
+                <select value={String(isPaid)} onChange={(event) => setIsPaid(event.target.value === "true")} disabled={isViewing}>
+                  <option value="true">Pagada</option>
+                  <option value="false">Pendiente</option>
+                </select>
+              </label>
+            </div>
+
+            {!isViewing && (
+              <div className="form-grid form-grid--compact">
+                <label className="field">
+                  <span>Producto</span>
+                  <select value={selectedProductId} onChange={(event) => setSelectedProductId(event.target.value)}>
+                    <option value="">Selecciona un producto</option>
+                    {products.data.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Cantidad</span>
+                  <input
+                    required
+                    min="1"
+                    type="number"
+                    value={quantityDraft.selectedQuantity}
+                    onChange={(event) => setQuantityDraft({ selectedQuantity: event.target.value })}
+                    onFocus={handleQuantityFocus}
+                    onBlur={handleQuantityBlur}
+                  />
+                </label>
+
+                <label className="toggle">
+                  <input
+                    checked={saleByBasket}
+                    onChange={(event) => setSaleByBasket(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Vender por canasta</span>
+                </label>
+
+                <button className="button button--secondary" onClick={addItem} type="button">
+                  Agregar item
+                </button>
+              </div>
             )}
 
-            <label className="field">
-              <span>Cliente</span>
-              <select value={clientId} onChange={(event) => setClientId(event.target.value)} disabled={isViewing}>
-                <option value="">Sin cliente</option>
-                {clients.data.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {!isViewing && saleByBasket && selectedProduct?.saleBasketPrice == null && selectedProduct && (
+              <div className="empty-state field--full">Este producto no tiene precio por canasta configurado.</div>
+            )}
 
-            <label className={saleType === "EXTERNAL" ? "field field--full" : "field"}>
-              <span>Estado</span>
-              <select value={String(isPaid)} onChange={(event) => setIsPaid(event.target.value === "true")} disabled={isViewing}>
-                <option value="true">Pagada</option>
-                <option value="false">Pendiente</option>
-              </select>
-            </label>
-          </div>
-
-          {!isViewing && (
-            <div className="form-grid form-grid--compact">
-              <label className="field">
-                <span>Producto</span>
-                <select value={selectedProductId} onChange={(event) => setSelectedProductId(event.target.value)}>
-                  <option value="">Selecciona un producto</option>
-                  {products.data.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.name}
-                    </option>
+            <div className="field--full">
+              <Panel title="Items de la venta" subtitle={`Total: ${formatCurrency(isViewing ? getSaleAmount(viewedSale!) : totalDraft)}`}>
+                <div className="stack-list">
+                  {items.map((item, index) => (
+                    <div className="list-row" key={`${item.productId}-${index}`}>
+                      <div>
+                        <strong>{item.productName}</strong>
+                        <span>
+                          {item.quantity} x {formatCurrency(item.unitPrice)}
+                        </span>
+                      </div>
+                      <div className="inline-actions">
+                        <strong>{formatCurrency(item.totalPrice)}</strong>
+                        {!isViewing && (
+                          <button
+                            className="button button--ghost"
+                            onClick={() =>
+                              setItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
+                            }
+                            type="button"
+                          >
+                            Quitar
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Cantidad</span>
-                <input
-                  required
-                  min="1"
-                  type="number"
-                  value={quantityDraft.selectedQuantity}
-                  onChange={(event) => setQuantityDraft({ selectedQuantity: event.target.value })}
-                  onFocus={handleQuantityFocus}
-                  onBlur={handleQuantityBlur}
-                />
-              </label>
-
-              <label className="toggle">
-                <input
-                  checked={saleByBasket}
-                  onChange={(event) => setSaleByBasket(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>Vender por canasta</span>
-              </label>
-
-              <button className="button button--secondary" onClick={addItem} type="button">
-                Agregar item
-              </button>
+                  {items.length === 0 && (
+                    <div className="empty-state">
+                      {isViewing ? "Esta venta no tiene productos detallados." : "Agrega productos para construir la venta."}
+                    </div>
+                  )}
+                </div>
+              </Panel>
             </div>
-          )}
-
-          {!isViewing && saleByBasket && selectedProduct?.saleBasketPrice == null && selectedProduct && (
-            <div className="empty-state field--full">Este producto no tiene precio por canasta configurado.</div>
-          )}
-
-          <div className="field--full">
-            <Panel title="Items de la venta" subtitle={`Total: ${formatCurrency(isViewing ? getSaleAmount(viewedSale!) : totalDraft)}`}>
-              <div className="stack-list">
-                {items.map((item, index) => (
-                  <div className="list-row" key={`${item.productId}-${index}`}>
-                    <div>
-                      <strong>{item.productName}</strong>
-                      <span>
-                        {item.quantity} x {formatCurrency(item.unitPrice)}
-                      </span>
-                    </div>
-                    <div className="inline-actions">
-                      <strong>{formatCurrency(item.totalPrice)}</strong>
-                      {!isViewing && (
-                        <button
-                          className="button button--ghost"
-                          onClick={() =>
-                            setItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
-                          }
-                          type="button"
-                        >
-                          Quitar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {items.length === 0 && (
-                  <div className="empty-state">
-                    {isViewing ? "Esta venta no tiene productos detallados." : "Agrega productos para construir la venta."}
-                  </div>
-                )}
-              </div>
-            </Panel>
           </div>
 
           <div className="modal__footer field--full">

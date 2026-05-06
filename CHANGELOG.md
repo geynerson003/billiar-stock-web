@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.3.0...billiard-stock-web-v1.3.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* git commmit -m ([0f3137a](https://github.com/geynerson003/billiar-stock-web/commit/0f3137a189a3a49c5e15cbc5291044d42d5c37c5))
+* git commmit -m ([bdd5eb3](https://github.com/geynerson003/billiar-stock-web/commit/bdd5eb3b6879a00b5c3521d32296ad1e3cbe20ce))
+
 ## [1.3.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.2.0...billiard-stock-web-v1.3.0) (2026-04-17)
 
 

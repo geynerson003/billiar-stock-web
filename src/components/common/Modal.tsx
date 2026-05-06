@@ -1,4 +1,5 @@
 import { useEffect, type PropsWithChildren } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps extends PropsWithChildren {
   open: boolean;
@@ -29,7 +30,7 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       className="modal-backdrop"
       onClick={onClose}
@@ -55,6 +56,7 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
         </div>
         <div className="modal__content">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

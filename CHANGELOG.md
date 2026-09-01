@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.3.1...billiard-stock-web-v2.0.0) (2026-09-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* la aplicación cambia de marca de "Billiard Stock" a "Mi Negocio". Las cuentas existentes sin el campo `market` en users/{uid} deben completar el onboarding de selección de mercado antes de poder usar la app.
+
+### Features
+
+* rebrand a "Mi Negocio" con multi-mercado, empleados y ajustes ([10e12ff](https://github.com/geynerson003/billiar-stock-web/commit/10e12ff8ca68d3931a0bb27738485caf05996788))
+
 ## [1.3.1](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.3.0...billiard-stock-web-v1.3.1) (2026-05-06)
 
 

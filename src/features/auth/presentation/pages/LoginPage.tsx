@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks";
+import { AuthHero, PasswordField } from "../components";
 import { usePWAInstall } from "../../../../shared/hooks";
+import { APP_BRAND_NAME } from "../../../../shared/constants";
 import { getFirebaseErrorMessage } from "../../../../shared/utils";
 
 export function LoginPage() {
@@ -46,7 +48,7 @@ export function LoginPage() {
           boxShadow: 'var(--shadow-sm)' 
         }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <strong style={{ fontSize: '0.9rem' }}>Billiard Stock</strong>
+            <strong style={{ fontSize: '0.9rem' }}>{APP_BRAND_NAME}</strong>
             <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>Mejor experiencia y más rápida</span>
           </div>
           <button 
@@ -68,17 +70,21 @@ export function LoginPage() {
         </div>
       )}
       <div className="auth-screen">
-        <div className="auth-hero">
-        <span className="page-header__eyebrow">Billiard Stock Web</span>
-        <h1>Administra tu billar desde cualquier navegador</h1>
-        <p>
-          Controla inventario, ventas, clientes, deudas, mesas y reportes.
-        </p>
-      </div>
+        <AuthHero
+          title="Administra tu negocio desde cualquier navegador"
+          description="Controla inventario, ventas, clientes, deudas y reportes desde un solo panel."
+          features={[
+            "Inventario y ventas en tiempo real",
+            "Clientes, deudas y pagos al día",
+            "Reportes claros del negocio cada día",
+          ]}
+        />
 
       <form className="auth-card" onSubmit={handleSubmit}>
-        <h2>Iniciar sesión</h2>
-        <p>Entra a tu operación diaria con una vista web rápida y limpia.</p>
+        <div className="auth-card__head">
+          <h2>Iniciar sesión</h2>
+          <p>Entra a tu operación diaria con una vista web rápida y limpia.</p>
+        </div>
 
         <label className="field" htmlFor="login-email">
           <span>Correo</span>
@@ -88,23 +94,20 @@ export function LoginPage() {
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="negocio@billar.com"
+            placeholder="tu@negocio.com"
             autoComplete="email"
           />
         </label>
 
-        <label className="field" htmlFor="login-password">
-          <span>Contraseña</span>
-          <input
-            id="login-password"
-            required
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Tu contraseña"
-            autoComplete="current-password"
-          />
-        </label>
+        <PasswordField
+          id="login-password"
+          label="Contraseña"
+          required
+          value={password}
+          onChange={setPassword}
+          placeholder="Tu contraseña"
+          autoComplete="current-password"
+        />
 
         {error && <div className="alert alert--error">{error}</div>}
 
@@ -120,6 +123,7 @@ export function LoginPage() {
         <div className="auth-links">
           <Link to="/forgot-password">¿Olvidaste tu contraseña?</Link>
           <Link to="/register">Crear cuenta</Link>
+          <Link to="/staff-login">Soy empleado</Link>
         </div>
       </form>
     </div>

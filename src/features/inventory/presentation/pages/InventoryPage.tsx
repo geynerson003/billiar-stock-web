@@ -1,30 +1,22 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { Modal, PageHeader, Panel, useConfirmDialog } from "../../../../shared/components";
-import { useAuth, useLiveCollection, useToast } from "../../../../shared/hooks";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { BarcodeScanModal, Modal, PageHeader, QueryError, useConfirmDialog } from "../../../../shared/components";
+import { useAsyncAction, useBusinessId, useLiveCollection, usePermissions, useScannerMode, useToast } from "../../../../shared/hooks";
 import type { Product } from "../../../../shared/types";
 import {
   addOrUpdateProduct,
   businessCollection,
   calculateProductMetrics,
   deleteProduct,
+  findProductByBarcode,
   mapProduct,
 } from "../../../../shared/services/firebase/business.service";
+import { calculateProductFinancials } from "../../../../shared/utils/financial";
 import { formatCurrency } from "../../../../shared/utils/format";
-
-const blankProduct: Product = {
-  id: "",
-  name: "",
-  stock: 0,
-  supplierPrice: 0,
-  salePrice: 0,
-  minStock: 0,
-  saleBasketPrice: null,
-  unitsPerPackage: 1,
-};
 
 type ProductDraft = {
   id: string;
   name: string;
+  barcode: string;
   packageQuantity: string;
   supplierPrice: string;
   salePrice: string;
@@ -37,6 +29,7 @@ type ProductDraft = {
 const blankProductDraft: ProductDraft = {
   id: "",
   name: "",
+  barcode: "",
   packageQuantity: "0",
   supplierPrice: "0",
   salePrice: "0",
@@ -52,6 +45,7 @@ function productToDraft(product: Product): ProductDraft {
   return {
     id: product.id,
     name: product.name,
+    barcode: product.barcode ?? "",
     packageQuantity: "0",
     supplierPrice: String(product.supplierPrice),
     salePrice: String(product.salePrice),
@@ -70,6 +64,7 @@ function draftToProduct(draft: ProductDraft): Product {
   return {
     id: draft.id,
     name: draft.name.trim(),
+    barcode: draft.barcode.trim() ? draft.barcode.trim() : null,
     stock: draft.existingStock + addedStock,
     supplierPrice: Number(draft.supplierPrice || 0),
     salePrice: Number(draft.salePrice || 0),
@@ -80,15 +75,18 @@ function draftToProduct(draft: ProductDraft): Product {
 }
 
 export function InventoryPage() {
-  const { user } = useAuth();
   const { toast } = useToast();
-  const userId = user?.uid;
+  const { run: runAction } = useAsyncAction();
+  const { can } = usePermissions();
+  const userId = useBusinessId(); // businessId efectivo (uid del dueño)
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProductDraft>(blankProductDraft);
   const [confirmDialog, confirm] = useConfirmDialog();
+  const { scannerMode } = useScannerMode();
+  const [scanModalOpen, setScanModalOpen] = useState(false);
+  const [scanTarget, setScanTarget] = useState<"create" | "field" | null>(null);
 
   const products = useLiveCollection(
     () => (userId ? businessCollection(userId, "products") : null),
@@ -104,6 +102,20 @@ export function InventoryPage() {
     [products.data, search]
   );
 
+  const selectedProduct = useMemo(
+    () =>
+      filteredProducts.find((product) => product.id === selectedId) ??
+      filteredProducts[0] ??
+      null,
+    [filteredProducts, selectedId]
+  );
+
+  useEffect(() => {
+    if (selectedProduct && selectedProduct.id !== selectedId) {
+      setSelectedId(selectedProduct.id);
+    }
+  }, [selectedProduct, selectedId]);
+
   function openCreate() {
     setDraft(blankProductDraft);
     setModalOpen(true);
@@ -114,19 +126,41 @@ export function InventoryPage() {
     setModalOpen(true);
   }
 
-  function openDetails(product: Product) {
-    setSelectedProduct(product);
-    setDetailsModalOpen(true);
-  }
-
   function closeModal() {
     setModalOpen(false);
     setDraft(blankProductDraft);
   }
 
+  function openScanCreate() {
+    setScanTarget("create");
+    setScanModalOpen(true);
+  }
+
+  function openScanField() {
+    setScanTarget("field");
+    setScanModalOpen(true);
+  }
+
+  async function handleBarcodeDetected(code: string) {
+    if (scanTarget === "field") {
+      handleTextChange("barcode", code);
+      return;
+    }
+
+    if (!userId) return;
+    const existing = await findProductByBarcode(userId, code);
+    if (existing) {
+      toast("info", `Ya existe "${existing.name}" con ese código. Ábrelo para actualizar su stock.`);
+      openEdit(existing);
+    } else {
+      setDraft({ ...blankProductDraft, barcode: code });
+      setModalOpen(true);
+    }
+  }
+
   async function saveProduct(event: FormEvent) {
     event.preventDefault();
-    if (!userId) return;
+    if (!userId || !can("inventory.edit")) return;
 
     if (
       !draft.name.trim() ||
@@ -146,21 +180,33 @@ export function InventoryPage() {
       return;
     }
 
-    await addOrUpdateProduct(userId, draftToProduct(draft));
-    toast("success", draft.id ? "Producto actualizado" : "Producto creado con éxito");
-    closeModal();
+    if (draft.barcode.trim()) {
+      const existing = await findProductByBarcode(userId, draft.barcode.trim());
+      if (existing && existing.id !== draft.id) {
+        toast("warning", `El código de barras ya está asignado a "${existing.name}".`);
+        return;
+      }
+    }
+
+    await runAction(() => addOrUpdateProduct(userId, draftToProduct(draft)), {
+      success: draft.id ? "Producto actualizado" : "Producto creado con éxito",
+      errorFallbackId: "inventory.save.error",
+      onSuccess: closeModal,
+    });
   }
 
   async function removeProduct(productId: string) {
-    if (!userId) return;
+    if (!userId || !can("inventory.delete")) return;
     const confirmed = await confirm({
       title: "Eliminar producto",
       message: "¿Estás seguro de eliminar este producto del inventario?",
       confirmLabel: "Eliminar",
     });
     if (!confirmed) return;
-    await deleteProduct(userId, productId);
-    toast("success", "Producto eliminado");
+    await runAction(() => deleteProduct(userId, productId), {
+      success: "inventory.delete.success",
+      errorFallbackId: "inventory.delete.error",
+    });
   }
 
   function handleTextChange<K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) {
@@ -186,6 +232,34 @@ export function InventoryPage() {
 
   const metrics = calculateProductMetrics(draftToProduct(draft));
 
+  const detailRows: Array<{ k: string; v: string; tone?: string }> = selectedProduct
+    ? (() => {
+        const p = selectedProduct;
+        const fin = calculateProductFinancials(p);
+        return [
+          { k: "Stock actual", v: `${p.stock} und` },
+          { k: "Stock mínimo", v: `${p.minStock} und` },
+          { k: "Costo por unidad", v: formatCurrency(fin.costoUnidad) },
+          { k: "Precio de venta", v: formatCurrency(p.salePrice) },
+          {
+            k: "Ganancia por unidad",
+            v: formatCurrency(fin.gananciaUnidad),
+            tone: fin.gananciaUnidad >= 0 ? "var(--green)" : "var(--red)",
+          },
+          { k: "Margen por unidad", v: `${fin.margenUnidad.toFixed(1)}%` },
+          { k: "Ganancia por paquete/canasta", v: formatCurrency(fin.gananciaPaquete) },
+          { k: "Margen por paquete/canasta", v: `${fin.margenPaquete.toFixed(1)}%` },
+          { k: "Valor a precio proveedor", v: formatCurrency(fin.valorProveedor) },
+          { k: "Valor a precio de venta", v: formatCurrency(fin.valorVenta) },
+          {
+            k: "Ganancia potencial total",
+            v: formatCurrency(fin.gananciaPotencial),
+            tone: "var(--green)",
+          },
+        ];
+      })()
+    : [];
+
   return (
     <div className="page page-themed page-themed--inventory">
       {confirmDialog}
@@ -202,62 +276,112 @@ export function InventoryPage() {
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Buscar producto…"
             />
-            <button className="button button--primary" onClick={openCreate} type="button">
-              Nuevo producto
-            </button>
+            {can("inventory.edit") && (
+              <>
+                <button className="button button--secondary" onClick={openScanCreate} type="button">
+                  Escanear código de barras
+                </button>
+                <button className="button button--primary" onClick={openCreate} type="button">
+                  Nuevo producto
+                </button>
+              </>
+            )}
           </div>
         }
       />
 
-      <Panel title="Catálogo" subtitle={`${filteredProducts.length} productos visibles`}>
-        <div className="catalog-grid">
-          {filteredProducts.length === 0 && (
-            <div className="empty-state">No hay productos para mostrar con el filtro actual.</div>
-          )}
+      <QueryError error={products.error} />
 
-          {filteredProducts.map((product) => (
-            <article 
-              className="catalog-card catalog-card--interactive" 
-              key={product.id}
-              onClick={() => openDetails(product)}
-              style={{ cursor: "pointer" }}
-            >
-              <div className="catalog-card__top">
-                <div>
+      <div className="master-detail">
+        <div className="data-list">
+          <div className="data-list__head">
+            <span>{filteredProducts.length} productos</span>
+            <span>Stock · Precio</span>
+          </div>
+
+          {filteredProducts.map((product) => {
+            const low = product.stock <= product.minStock;
+            const ratio = Math.min(
+              100,
+              (product.stock / Math.max(product.minStock * 3, 1)) * 100
+            );
+            return (
+              <button
+                type="button"
+                key={product.id}
+                className={`data-list__row${
+                  product.id === selectedProduct?.id ? " data-list__row--selected" : ""
+                }`}
+                onClick={() => setSelectedId(product.id)}
+              >
+                <span className="data-list__row-top">
                   <strong>{product.name}</strong>
-                  <span>{product.stock} unidades disponibles</span>
-                </div>
-
-                <span
-                  className={`badge ${
-                    product.stock <= product.minStock ? "badge--danger" : ""
-                  }`}
-                >
-                  Mín {product.minStock}
+                  <span className="data-list__row-price">{formatCurrency(product.salePrice)}</span>
                 </span>
-              </div>
+                <span className="data-list__row-sub">
+                  <span className="data-list__bar">
+                    <span
+                      style={{
+                        width: `${ratio}%`,
+                        background: low ? "var(--red)" : "var(--green)",
+                      }}
+                    />
+                  </span>
+                  <span
+                    className="data-list__bar-label"
+                    style={{ color: low ? "var(--red)" : "var(--muted)" }}
+                  >
+                    {product.stock} und
+                  </span>
+                </span>
+              </button>
+            );
+          })}
 
-              <div className="catalog-card__meta">
-                <span>Proveedor {formatCurrency(product.supplierPrice)}</span>
-                <span>Venta {formatCurrency(product.salePrice)}</span>
-                <span>Paquete {product.unitsPerPackage} und</span>
-                {product.saleBasketPrice != null && (
-                  <span>Canasta {formatCurrency(product.saleBasketPrice)}</span>
-                )}
-              </div>
+          {filteredProducts.length === 0 && (
+            <div className="empty-state">
+              {search
+                ? `Ningún producto coincide con «${search}».`
+                : "Aún no has registrado productos."}
+            </div>
+          )}
+        </div>
 
-              <div className="inline-actions" onClick={(e) => e.stopPropagation()}>
-                <button className="button button--secondary" onClick={() => openEdit(product)} type="button">
+        {selectedProduct && (
+          <aside className="detail-aside">
+            <div className="detail-aside__eyebrow">Detalle</div>
+            <div className="detail-aside__name">{selectedProduct.name}</div>
+
+            {detailRows.map((row) => (
+              <div className="detail-row" key={row.k}>
+                <span>{row.k}</span>
+                <strong style={row.tone ? { color: row.tone } : undefined}>{row.v}</strong>
+              </div>
+            ))}
+
+            <div className="detail-aside__actions">
+              {can("inventory.edit") && (
+                <button
+                  className="button button--secondary"
+                  onClick={() => openEdit(selectedProduct)}
+                  type="button"
+                >
                   Editar
                 </button>
-                <button className="button button--ghost" onClick={() => void removeProduct(product.id)} type="button">
+              )}
+              {can("inventory.delete") && (
+                <button
+                  className="button button--ghost"
+                  onClick={() => void removeProduct(selectedProduct.id)}
+                  type="button"
+                >
                   Eliminar
                 </button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </Panel>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
 
       <Modal
         open={modalOpen}
@@ -272,6 +396,20 @@ export function InventoryPage() {
               value={draft.name}
               onChange={(event) => handleTextChange("name", event.target.value)}
             />
+          </label>
+
+          <label className="field">
+            <span>Código de barras (opcional)</span>
+            <div className="inline-actions">
+              <input
+                value={draft.barcode}
+                onChange={(event) => handleTextChange("barcode", event.target.value)}
+                placeholder="Escribe o escanea el código…"
+              />
+              <button className="button button--secondary" onClick={openScanField} type="button">
+                Escanear
+              </button>
+            </div>
           </label>
 
           <label className="field">
@@ -380,62 +518,13 @@ export function InventoryPage() {
         </form>
       </Modal>
 
-      <Modal open={detailsModalOpen} title="Detalles Financieros del Producto" onClose={() => setDetailsModalOpen(false)}>
-        {selectedProduct && (() => {
-          const p = selectedProduct;
-          const uxp = Math.max(p.unitsPerPackage, 1);
-          
-          const costoUnidad = p.supplierPrice / uxp;
-          const gananciaUnidad = p.salePrice - costoUnidad;
-          const margenUnidad = p.salePrice > 0 ? (gananciaUnidad / p.salePrice) * 100 : 0;
-
-          const ventaPaquete = p.saleBasketPrice ?? (p.salePrice * uxp);
-          const gananciaPaquete = ventaPaquete - p.supplierPrice;
-          const margenPaquete = ventaPaquete > 0 ? (gananciaPaquete / ventaPaquete) * 100 : 0;
-
-          const valorProveedor = p.stock * costoUnidad;
-          const valorVenta = p.stock * p.salePrice;
-          const gananciaPotencial = valorVenta - valorProveedor;
-
-          return (
-            <div className="form-grid" style={{ gap: '1.5rem', maxHeight: '70vh', overflowY: 'auto', paddingRight: '4px' }}>
-              <div>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>CÁLCULOS POR UNIDAD</h4>
-                <div className="stack-list">
-                   <div className="list-row"><span>Precio proveedor por unidad</span><strong>{formatCurrency(costoUnidad)}</strong></div>
-                   <div className="list-row"><span>Ganancia por unidad</span><strong>{formatCurrency(gananciaUnidad)}</strong></div>
-                   <div className="list-row"><span>Margen de ganancia por unidad</span><strong>{margenUnidad.toFixed(1)}%</strong></div>
-                </div>
-              </div>
-
-              <div>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>CÁLCULOS POR PAQUETE/CANASTA</h4>
-                <div className="stack-list">
-                   <div className="list-row"><span>Ganancia por paquete</span><strong>{formatCurrency(gananciaPaquete)}</strong></div>
-                   <div className="list-row"><span>Margen de ganancia por paquete</span><strong>{margenPaquete.toFixed(1)}%</strong></div>
-                </div>
-              </div>
-
-              <div>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>VALORES DEL INVENTARIO</h4>
-                <div className="stack-list">
-                   <div className="list-row"><span>Valor al precio del proveedor</span><strong>{formatCurrency(valorProveedor)}</strong></div>
-                   <div className="list-row"><span>Valor al precio de venta</span><strong>{formatCurrency(valorVenta)}</strong></div>
-                   <div className="list-row" style={{ marginTop: 8, borderTop: '1px solid var(--panel-border)', paddingTop: 8 }}>
-                     <span>Ganancia potencial total</span>
-                     <strong style={{ color: 'var(--green)' }}>{formatCurrency(gananciaPotencial)}</strong>
-                   </div>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-        <div className="modal__footer" style={{ marginTop: '1.5rem' }}>
-          <button className="button button--secondary" onClick={() => setDetailsModalOpen(false)} type="button">
-            Cerrar
-          </button>
-        </div>
-      </Modal>
+      <BarcodeScanModal
+        open={scanModalOpen}
+        onClose={() => setScanModalOpen(false)}
+        onDetect={(code) => void handleBarcodeDetected(code)}
+        initialMode={scannerMode}
+        closeOnDetect
+      />
     </div>
   );
 }

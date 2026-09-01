@@ -1,4 +1,5 @@
 export * from "./register.use-case";
+export * from "./update-profile.use-case";
 export * from "./login.use-case";
 export * from "./logout.use-case";
 export * from "./reset-password.use-case";

@@ -2,6 +2,8 @@ export type SaleType = "TABLE" | "EXTERNAL";
 export type PaymentMethod = "CASH" | "CARD" | "TRANSFER" | "OTHER";
 export type GameStatus = "ACTIVE" | "FINISHED" | "CANCELLED";
 export type ReportType = "DAILY" | "WEEKLY" | "MONTHLY" | "CUSTOM";
+/** Cómo se cobra una mesa: por partida jugada o por un bloque de tiempo con cronómetro. */
+export type TablePricingMode = "GAME" | "TIME";
 
 export interface UserProfile {
   uid: string;
@@ -9,6 +11,65 @@ export interface UserProfile {
   businessName: string;
   createdAt: number;
   isActive: boolean;
+  /** Código ISO-3166 alpha-2 del país. Determina moneda y locale. */
+  country: string;
+  /**
+   * Tipo de negocio elegido en el registro (ver `src/shared/constants/markets.ts`).
+   * Determina terminología y qué secciones se muestran. Opcional: los perfiles
+   * antiguos no lo tienen y se les pide en un gate de onboarding.
+   */
+  market?: string;
+  /**
+   * Rol dentro del negocio. Ausente ⇒ administrador/dueño (compatibilidad con
+   * cuentas anteriores a multiusuario). Ver `src/shared/constants/permissions.ts`.
+   */
+  role?: "admin" | "employee";
+  /** Solo empleados: uid del dueño del negocio (= businessId efectivo). */
+  ownerUid?: string;
+  /**
+   * Solo empleados: id estable del empleado dentro del negocio. Se usa como
+   * `sellerId`/autoría y NO cambia al resetear la contraseña.
+   */
+  employeeId?: string;
+  /** Solo empleados: nombre de usuario para iniciar sesión, tal cual lo escribió el admin. */
+  loginName?: string;
+  /**
+   * Solo empleados: `loginName` normalizado (minúsculas, sin acentos,
+   * `[^a-z0-9]+` → `-`). Único por negocio.
+   */
+  loginNameSlug?: string;
+  /** Solo empleados: nombre visible en el panel del admin. */
+  displayName?: string;
+  /** Solo empleados: permisos concedidos (ids de `Permission`). */
+  permissions?: string[];
+  /** Solo empleados: preset de rol aplicado (`vendedor` | `encargado` | `custom`). Metadato de UI. */
+  rolePreset?: string;
+  /** Solo empleados: versión de credencial. Se incrementa en cada reseteo de contraseña. */
+  credV?: number;
+  /** Solo empleados: email sintético con el que se autentican en Firebase Auth. */
+  syntheticEmail?: string;
+}
+
+/**
+ * Documento de empleado bajo `businesses/{ownerUid}/employees/{employeeId}`.
+ * Fuente de verdad para el panel de administración; `users/{authUid}` es el
+ * espejo que lee el propio empleado en runtime.
+ */
+export interface EmployeeDoc {
+  id: string;
+  loginName: string;
+  loginNameSlug: string;
+  displayName: string;
+  permissions: string[];
+  rolePreset: string;
+  isActive: boolean;
+  credV: number;
+  /** uid de Firebase Auth vigente del empleado (rota al resetear la contraseña). */
+  currentAuthUid: string;
+  syntheticEmail: string;
+  createdAt: number;
+  createdBy: string;
+  updatedAt: number;
 }
 
 export interface Product {
@@ -20,6 +81,8 @@ export interface Product {
   minStock: number;
   saleBasketPrice?: number | null;
   unitsPerPackage: number;
+  /** Código de barras del producto (EAN, UPC, Code128, etc.), si se registró. */
+  barcode?: string | null;
 }
 
 export interface Client {
@@ -69,6 +132,8 @@ export interface Payment {
   relatedSales: string[];
   isPartialPayment: boolean;
   notes: string;
+  /** Autoría: id del actor que registró el cobro (`employeeId` o uid del dueño). */
+  registeredBy?: string;
 }
 
 export interface Expense {
@@ -77,6 +142,8 @@ export interface Expense {
   amount: number;
   category: string;
   date: string;
+  /** Autoría: id del actor que registró el gasto (`employeeId` o uid del dueño). Se fija solo al crear. */
+  createdBy?: string;
 }
 
 export interface TableEntity {
@@ -84,6 +151,10 @@ export interface TableEntity {
   name: string;
   pricePerGame: number;
   currentSessionId?: string | null;
+  /** Forma de cobro de la mesa. Por defecto "GAME" (compatibilidad con mesas existentes). */
+  pricingMode?: TablePricingMode;
+  /** Duración del cronómetro en minutos, solo aplica cuando pricingMode es "TIME". */
+  timerDurationMinutes?: number;
 }
 
 export interface TableSession {
@@ -124,6 +195,10 @@ export interface Game {
   isPaid: boolean;
   status: GameStatus;
   totalAmount: number;
+  /** Copia de TableEntity.pricingMode al momento de iniciar la partida. */
+  pricingMode?: TablePricingMode;
+  /** Copia de TableEntity.timerDurationMinutes (en ms) al iniciar, para el cronómetro de esta partida. */
+  timerDurationMs?: number | null;
 }
 
 export interface ClientDebtInfo {

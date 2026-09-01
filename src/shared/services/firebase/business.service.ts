@@ -26,6 +26,7 @@ import {
 } from "../../utils/financial";
 import type {
   Client,
+  EmployeeDoc,
   Expense,
   Game,
   GameBet,
@@ -101,7 +102,8 @@ export const defaultUserProfile: UserProfile = {
   email: "",
   businessName: "",
   createdAt: Date.now(),
-  isActive: true
+  isActive: true,
+  country: "CO"
 };
 
 export const defaultProduct: Product = {
@@ -112,7 +114,8 @@ export const defaultProduct: Product = {
   salePrice: 0,
   minStock: 0,
   saleBasketPrice: null,
-  unitsPerPackage: 1
+  unitsPerPackage: 1,
+  barcode: null
 };
 
 export const defaultClient: Client = {
@@ -148,7 +151,9 @@ export const defaultTable: TableEntity = {
   id: "",
   name: "",
   pricePerGame: 0,
-  currentSessionId: null
+  currentSessionId: null,
+  pricingMode: "GAME",
+  timerDurationMinutes: 0
 };
 
 export const defaultSession: TableSession = {
@@ -179,6 +184,22 @@ export const defaultSale: Sale = {
   price: 0
 };
 
+export const defaultEmployee: EmployeeDoc = {
+  id: "",
+  loginName: "",
+  loginNameSlug: "",
+  displayName: "",
+  permissions: [],
+  rolePreset: "custom",
+  isActive: true,
+  credV: 1,
+  currentAuthUid: "",
+  syntheticEmail: "",
+  createdAt: Date.now(),
+  createdBy: "",
+  updatedAt: Date.now()
+};
+
 export const defaultGame: Game = {
   id: "",
   tableId: "",
@@ -192,7 +213,9 @@ export const defaultGame: Game = {
   amountPerLoser: 0,
   isPaid: false,
   status: "ACTIVE",
-  totalAmount: 0
+  totalAmount: 0,
+  pricingMode: "GAME",
+  timerDurationMs: null
 };
 
 export function businessCollection<T = DocumentData>(
@@ -237,8 +260,31 @@ export function mapProduct(snapshot: QueryDocumentSnapshot<DocumentData>): Produ
     saleBasketPrice:
       data.saleBasketPrice === undefined || data.saleBasketPrice === null
         ? null
-        : toNumber(data.saleBasketPrice)
+        : toNumber(data.saleBasketPrice),
+    barcode: toNullableText(data.barcode)
   };
+}
+
+/**
+ * Busca un producto por código de barras exacto. Se usa para resolver el
+ * producto al escanear (ventas) y para bloquear códigos duplicados al guardar
+ * (inventario), ya que Firestore no tiene constraints UNIQUE nativas.
+ */
+export async function findProductByBarcode(
+  userId: string,
+  barcode: string
+): Promise<Product | null> {
+  const normalized = barcode.trim();
+  if (!normalized) return null;
+
+  const snapshot = await getDocs(
+    query(
+      businessCollection<DocumentData>(userId, "products"),
+      where("barcode", "==", normalized)
+    )
+  );
+  if (snapshot.empty) return null;
+  return mapProduct(snapshot.docs[0] as QueryDocumentSnapshot<DocumentData>);
 }
 
 export function mapClient(snapshot: QueryDocumentSnapshot<DocumentData>): Client {
@@ -256,7 +302,8 @@ export function mapExpense(snapshot: QueryDocumentSnapshot<DocumentData>): Expen
   return {
     ...data,
     amount: toNumber(data.amount),
-    date: String(data.date ?? Date.now())
+    date: String(data.date ?? Date.now()),
+    createdBy: toNullableText(data.createdBy) ?? undefined
   };
 }
 
@@ -265,7 +312,8 @@ export function mapPayment(snapshot: QueryDocumentSnapshot<DocumentData>): Payme
   return {
     ...data,
     amount: toNumber(data.amount),
-    date: toMillis(data.date)
+    date: toMillis(data.date),
+    registeredBy: toNullableText(data.registeredBy) ?? undefined
   };
 }
 
@@ -274,7 +322,9 @@ export function mapTable(snapshot: QueryDocumentSnapshot<DocumentData>): TableEn
   return {
     ...data,
     pricePerGame: toNumber(data.pricePerGame),
-    currentSessionId: toNullableText(data.currentSessionId)
+    currentSessionId: toNullableText(data.currentSessionId),
+    pricingMode: data.pricingMode === "TIME" ? "TIME" : "GAME",
+    timerDurationMinutes: toNumber(data.timerDurationMinutes)
   };
 }
 
@@ -293,7 +343,14 @@ export function mapTableSession(
 
 export function mapSale(snapshot: QueryDocumentSnapshot<DocumentData>): Sale {
   const data = mapDoc(snapshot, defaultSale);
-  const legacyPaidFlag = (data as Sale & { paid?: boolean; Paid?: boolean }).paid;
+  // Las banderas de pago se leen del documento crudo: `mapDoc` mezcla
+  // `defaultSale` (que trae `isPaid: false`), así que `data.isPaid` nunca sería
+  // nullish y el fallback legacy `paid`/`Paid` quedaría muerto.
+  const raw = (snapshot.data() ?? {}) as {
+    isPaid?: unknown;
+    paid?: unknown;
+    Paid?: unknown;
+  };
   return {
     ...data,
     date: toMillis(data.date),
@@ -305,12 +362,7 @@ export function mapSale(snapshot: QueryDocumentSnapshot<DocumentData>): Sale {
     clientId: toText(data.clientId),
     quantity: toNumber(data.quantity),
     price: toNumber(data.price),
-    isPaid: toBoolean(
-      data.isPaid ??
-        legacyPaidFlag ??
-        (data as Sale & { paid?: boolean; Paid?: boolean }).Paid ??
-        false
-    ),
+    isPaid: toBoolean(raw.isPaid ?? raw.paid ?? raw.Paid ?? false),
     isGameSale: toBoolean(data.isGameSale),
     gameId: toNullableText(data.gameId),
     productId: toText(data.productId),
@@ -363,7 +415,33 @@ export function mapGame(snapshot: QueryDocumentSnapshot<DocumentData>): Game {
     isPaid: toBoolean(data.isPaid),
     status:
       data.status === "FINISHED" || data.status === "CANCELLED" ? data.status : "ACTIVE",
-    totalAmount: toNumber(data.totalAmount)
+    totalAmount: toNumber(data.totalAmount),
+    pricingMode: data.pricingMode === "TIME" ? "TIME" : "GAME",
+    timerDurationMs:
+      data.timerDurationMs === null || data.timerDurationMs === undefined
+        ? null
+        : toNumber(data.timerDurationMs)
+  };
+}
+
+export function mapEmployee(snapshot: QueryDocumentSnapshot<DocumentData>): EmployeeDoc {
+  const data = mapDoc(snapshot, defaultEmployee);
+  return {
+    ...data,
+    loginName: toText(data.loginName),
+    loginNameSlug: toText(data.loginNameSlug),
+    displayName: toText(data.displayName) || toText(data.loginName),
+    permissions: Array.isArray(data.permissions)
+      ? data.permissions.map((value) => toText(value))
+      : [],
+    rolePreset: toText(data.rolePreset, "custom"),
+    isActive: toBoolean(data.isActive, true),
+    credV: Math.max(toNumber(data.credV, 1), 1),
+    currentAuthUid: toText(data.currentAuthUid),
+    syntheticEmail: toText(data.syntheticEmail),
+    createdAt: toMillis(data.createdAt),
+    createdBy: toText(data.createdBy),
+    updatedAt: toMillis(data.updatedAt)
   };
 }
 
@@ -425,13 +503,20 @@ export async function addOrUpdateExpense(userId: string, expense: Expense): Prom
     ? await getDoc(doc(db, "businesses", userId, "expenses", expense.id))
     : null;
 
+  // La autoría (`createdBy`) se fija al crear y se preserva en ediciones.
+  const preservedCreatedBy =
+    current?.exists() && current.data()?.createdBy
+      ? String(current.data()?.createdBy)
+      : expense.createdBy;
+
   await setDoc(ref, {
     ...expense,
     id: ref.id,
     date:
       current?.exists() && current.data()?.date
         ? String(current.data()?.date)
-        : expense.date || String(Date.now())
+        : expense.date || String(Date.now()),
+    ...(preservedCreatedBy ? { createdBy: preservedCreatedBy } : {})
   });
 }
 
@@ -721,7 +806,9 @@ export async function finishTableSession(
   isPaid: boolean,
   products: Product[],
   tableId: string,
-  sessionId: string
+  sessionId: string,
+  /** Id del actor que cierra la sesión (`employeeId` o uid del dueño). */
+  actorId?: string
 ): Promise<void> {
   const finalizedGames = sessionGames.map((game) => {
     if (game.id === activeGameId) {
@@ -740,7 +827,7 @@ export async function finishTableSession(
     return { ...game, isPaid };
   });
 
-  const sales = finalizedGames.flatMap((g) => prepareGameSales(g, products));
+  const sales = finalizedGames.flatMap((g) => prepareGameSales(g, products, actorId));
 
   await runTransaction(db, async (transaction) => {
     const readData: {
@@ -840,7 +927,9 @@ export async function registerPayment(
   clientId: string,
   amount: number,
   description: string,
-  notes: string
+  notes: string,
+  /** Id del actor que registra el cobro (`employeeId` o uid del dueño). */
+  actorId?: string
 ): Promise<void> {
   const clientRef = doc(db, "businesses", userId, "clients", clientId);
   const clientSnapshot = await getDoc(clientRef);
@@ -865,7 +954,8 @@ export async function registerPayment(
     paymentMethod: "CASH",
     relatedSales: [],
     isPartialPayment: debtInfo.remainingDebt > amount,
-    notes
+    notes,
+    ...(actorId ? { registeredBy: actorId } : {})
   });
 
   const totalPaid = currentClient.totalPagado + amount;

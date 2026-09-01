@@ -1,7 +1,18 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Modal, PageHeader, Panel, useConfirmDialog } from "../../../../shared/components";
-import { useAuth, useLiveCollection, useToast } from "../../../../shared/hooks";
-import type { ReportFilter, ReportType, Sale, SaleItem, SaleType } from "../../../../shared/types";
+import { BarcodeScanModal, Modal, PageHeader, Panel, QueryError, useConfirmDialog } from "../../../../shared/components";
+import {
+  useAsyncAction,
+  useAuth,
+  useBusinessId,
+  useLiveCollection,
+  useMarket,
+  usePermissions,
+  usePrinterFormat,
+  useScannerMode,
+  useToast,
+} from "../../../../shared/hooks";
+import { APP_BRAND_NAME, getPrinterFormatOption } from "../../../../shared/constants";
+import type { Product, ReportFilter, ReportType, Sale, SaleItem, SaleType } from "../../../../shared/types";
 import {
   addSale,
   businessCollection,
@@ -14,6 +25,7 @@ import {
 } from "../../../../shared/services/firebase/business.service";
 import { calculateProfitForDraftItems, getDateRange, getSaleAmount } from "../../../../shared/utils/financial";
 import { formatCurrency, formatDate } from "../../../../shared/utils/format";
+import { buildInvoiceHtml, printHtml } from "../../../../shared/utils/invoice";
 
 type SaleDraft = {
   selectedQuantity: string;
@@ -24,9 +36,14 @@ const blankSaleDraft: SaleDraft = {
 };
 
 export function SalesPage() {
-  const { user } = useAuth();
+  const { profile, actorId } = useAuth();
+  const { can } = usePermissions();
   const { toast } = useToast();
-  const userId = user?.uid;
+  const { run: runAction } = useAsyncAction();
+  const market = useMarket();
+  const { printerFormat } = usePrinterFormat();
+  const showTables = market.features.tables;
+  const userId = useBusinessId(); // businessId efectivo (uid del dueño)
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState("");
@@ -40,6 +57,8 @@ export function SalesPage() {
   const [viewedSale, setViewedSale] = useState<Sale | null>(null);
   const isViewing = viewedSale !== null;
   const [confirmDialog, confirm] = useConfirmDialog();
+  const { scannerMode } = useScannerMode();
+  const [scanModalOpen, setScanModalOpen] = useState(false);
 
   const [filterType, setFilterType] = useState<ReportType>("DAILY");
   const [startDate, setStartDate] = useState("");
@@ -100,6 +119,22 @@ export function SalesPage() {
   const selectedProduct =
     products.data.find((product) => product.id === selectedProductId) ?? null;
 
+  const salesStats = useMemo(() => {
+    const total = filteredSales.reduce((sum, sale) => sum + getSaleAmount(sale), 0);
+    const pending = filteredSales
+      .filter((sale) => !sale.isPaid)
+      .reduce((sum, sale) => sum + getSaleAmount(sale), 0);
+    const average = filteredSales.length > 0 ? total / filteredSales.length : 0;
+    return { total, pending, average };
+  }, [filteredSales]);
+
+  const rangeChips: Array<{ label: string; value: ReportType }> = [
+    { label: "Hoy", value: "DAILY" },
+    { label: "Semana", value: "WEEKLY" },
+    { label: "Mes", value: "MONTHLY" },
+    { label: "Personalizado", value: "CUSTOM" },
+  ];
+
   function resetDraft() {
     setSelectedProductId("");
     setQuantityDraft(blankSaleDraft);
@@ -144,31 +179,48 @@ export function SalesPage() {
     resetDraft();
   }
 
-  function addItem() {
-    if (!selectedProduct) return;
+  function addItem(productOverride?: Product) {
+    const product = productOverride ?? selectedProduct;
+    if (!product) return;
 
     const quantity = Number(quantityDraft.selectedQuantity || 0);
     if (quantity < 1) {
       toast("warning", "La cantidad debe ser mayor a 0");
       return;
     }
-    if (saleByBasket && selectedProduct.saleBasketPrice == null) {
+    if (saleByBasket && product.saleBasketPrice == null) {
       toast("warning", "Este producto no tiene precio por canasta configurado");
       return;
     }
 
     setItems((current) => [
       ...current,
-      computeSaleLineItem(selectedProduct, quantity, saleByBasket),
+      computeSaleLineItem(product, quantity, saleByBasket),
     ]);
     setSelectedProductId("");
     setQuantityDraft(blankSaleDraft);
     setSaleByBasket(false);
   }
 
+  function handleSaleScan(code: string) {
+    const product = products.data.find((p) => p.barcode === code);
+    if (!product) {
+      toast("warning", "No se encontró ningún producto con ese código.");
+      return;
+    }
+    if (saleByBasket && product.saleBasketPrice == null) {
+      toast("warning", `"${product.name}" no tiene precio por canasta configurado.`);
+      return;
+    }
+
+    const quantity = Number(quantityDraft.selectedQuantity || 0) || 1;
+    setItems((current) => [...current, computeSaleLineItem(product, quantity, saleByBasket)]);
+    toast("success", `${product.name} agregado.`);
+  }
+
   async function saveSale(event: FormEvent) {
     event.preventDefault();
-    if (!userId) return;
+    if (!userId || !can("sales.create")) return;
 
     if (items.length === 0) {
       toast("warning", "Agrega al menos un item a la venta");
@@ -188,7 +240,7 @@ export function SalesPage() {
       date: Date.now(),
       tableId: saleType === "TABLE" ? tableId : null,
       type: saleType,
-      sellerId: userId,
+      sellerId: actorId ?? userId,
       clientId,
       isPaid,
       isGameSale: false,
@@ -199,21 +251,42 @@ export function SalesPage() {
       price: 0,
     };
 
-    await addSale(userId, sale);
-    toast("success", "Venta registrada con éxito");
-    closeModal();
+    await runAction(() => addSale(userId, sale), {
+      success: "sales.save.success",
+      errorFallbackId: "sales.save.error",
+      onSuccess: closeModal,
+    });
   }
 
   async function removeSale(sale: Sale) {
-    if (!userId) return;
+    if (!userId || !can("sales.delete")) return;
     const confirmed = await confirm({
       title: "Eliminar venta",
       message: "¿Eliminar esta venta y revertir sus efectos?",
       confirmLabel: "Eliminar",
     });
     if (!confirmed) return;
-    await deleteSale(userId, sale);
-    toast("success", "Venta eliminada");
+    await runAction(() => deleteSale(userId, sale), {
+      success: "sales.delete.success",
+      errorFallbackId: "sales.delete.error",
+    });
+  }
+
+  function printSale(sale: Sale) {
+    const clientName =
+      clients.data.find((client) => client.id === sale.clientId)?.nombre ?? "Sin cliente";
+    const tableName =
+      tables.data.find((table) => table.id === sale.tableId)?.name ?? null;
+
+    printHtml(
+      buildInvoiceHtml({
+        sale,
+        businessName: profile?.businessName?.trim() || APP_BRAND_NAME,
+        clientName,
+        tableName,
+        format: getPrinterFormatOption(printerFormat),
+      })
+    );
   }
 
   return (
@@ -222,7 +295,7 @@ export function SalesPage() {
 
       <PageHeader
         eyebrow="Ventas"
-        title="Gestion de ventas"
+        title="Movimientos"
         description="Gestiona tus ventas y registra nuevas ventas."
         actions={
           <div className="inline-actions">
@@ -230,41 +303,59 @@ export function SalesPage() {
               className="search-input"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por cliente, mesa o producto…"
+              placeholder={showTables ? "Buscar por cliente, mesa o producto…" : "Buscar por cliente o producto…"}
             />
-            <button className="button button--primary" onClick={openCreate} type="button">
-              Nueva venta
-            </button>
+            {can("sales.create") && (
+              <button className="button button--primary" onClick={openCreate} type="button">
+                Nueva venta
+              </button>
+            )}
           </div>
         }
       />
 
-      <Panel title="Filtros">
+      <QueryError error={sales.error ?? products.error} />
+
+      <div className="range-chips">
+        {rangeChips.map((chip) => (
+          <button
+            key={chip.value}
+            type="button"
+            className={`range-chip${filterType === chip.value ? " range-chip--active" : ""}`}
+            onClick={() => setFilterType(chip.value)}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
+      {filterType === "CUSTOM" && (
         <div className="filter-grid">
           <label className="field">
-            <span>Tipo</span>
-            <select value={filterType} onChange={(event) => setFilterType(event.target.value as ReportType)}>
-              <option value="DAILY">Diario</option>
-              <option value="WEEKLY">Semanal</option>
-              <option value="MONTHLY">Mensual</option>
-              <option value="CUSTOM">Personalizado</option>
-            </select>
+            <span>Fecha inicio</span>
+            <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
           </label>
-
-          {filterType === "CUSTOM" && (
-            <>
-              <label className="field">
-                <span>Fecha inicio</span>
-                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-              </label>
-              <label className="field">
-                <span>Fecha fin</span>
-                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-              </label>
-            </>
-          )}
+          <label className="field">
+            <span>Fecha fin</span>
+            <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+          </label>
         </div>
-      </Panel>
+      )}
+
+      <div className="kpi-strip">
+        <div className="kpi-strip__cell">
+          <span className="kpi-strip__label">Total vendido</span>
+          <strong className="kpi-strip__value">{formatCurrency(salesStats.total)}</strong>
+        </div>
+        <div className="kpi-strip__cell">
+          <span className="kpi-strip__label">Por cobrar</span>
+          <strong className="kpi-strip__value">{formatCurrency(salesStats.pending)}</strong>
+        </div>
+        <div className="kpi-strip__cell">
+          <span className="kpi-strip__label">Ticket promedio</span>
+          <strong className="kpi-strip__value">{formatCurrency(salesStats.average)}</strong>
+        </div>
+      </div>
 
       <Panel title="Historial reciente" subtitle={`${filteredSales.length} ventas`}>
         <div className="stack-list">
@@ -275,8 +366,8 @@ export function SalesPage() {
               tables.data.find((entry) => entry.id === sale.tableId)?.name ?? "Externa";
 
             return (
-              <div 
-                className="list-row list-row--expanded" 
+              <div
+                className="list-row list-row--expanded"
                 key={sale.id}
                 onClick={() => openView(sale)}
                 style={{ cursor: "pointer" }}
@@ -284,24 +375,36 @@ export function SalesPage() {
                 <div>
                   <strong>{client}</strong>
                   <span>
-                    {table} · {formatDate(sale.date)} ·{" "}
-                    <span className={`badge ${sale.isPaid ? "badge--success" : "badge--danger"}`}>
-                      {sale.isPaid ? "Pagada" : "Pendiente"}
-                    </span>
+                    {table} · {formatDate(sale.date)}
                   </span>
                 </div>
                 <div className="inline-actions">
+                  <span className={`badge ${sale.isPaid ? "badge--success" : "badge--danger"}`}>
+                    {sale.isPaid ? "Pagada" : "Pendiente"}
+                  </span>
                   <strong>{formatCurrency(getSaleAmount(sale))}</strong>
-                  <button 
-                    className="button button--ghost" 
+                  <button
+                    className="button button--ghost"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void removeSale(sale);
-                    }} 
+                      printSale(sale);
+                    }}
                     type="button"
                   >
-                    Eliminar
+                    Imprimir
                   </button>
+                  {can("sales.delete") && (
+                    <button
+                      className="button button--ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void removeSale(sale);
+                      }}
+                      type="button"
+                    >
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -316,15 +419,17 @@ export function SalesPage() {
         <form onSubmit={saveSale} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div className="form-grid" style={{ maxHeight: "70vh", overflowY: "auto", paddingRight: "4px" }}>
             <div className="form-grid field--full">
-              <label className="field">
-                <span>Tipo de venta</span>
-                <select value={saleType} onChange={(event) => setSaleType(event.target.value as SaleType)} disabled={isViewing}>
-                  <option value="EXTERNAL">Externa</option>
-                  <option value="TABLE">Por mesa</option>
-                </select>
-              </label>
+              {(showTables || isViewing) && (
+                <label className="field">
+                  <span>Tipo de venta</span>
+                  <select value={saleType} onChange={(event) => setSaleType(event.target.value as SaleType)} disabled={isViewing}>
+                    <option value="EXTERNAL">Externa</option>
+                    <option value="TABLE">{market.terms.salesTableOption}</option>
+                  </select>
+                </label>
+              )}
 
-              {saleType === "TABLE" && (
+              {saleType === "TABLE" && (showTables || isViewing) && (
                 <label className="field">
                   <span>Mesa</span>
                   <select value={tableId} onChange={(event) => setTableId(event.target.value)} required disabled={isViewing}>
@@ -363,14 +468,19 @@ export function SalesPage() {
               <div className="form-grid form-grid--compact">
                 <label className="field">
                   <span>Producto</span>
-                  <select value={selectedProductId} onChange={(event) => setSelectedProductId(event.target.value)}>
-                    <option value="">Selecciona un producto</option>
-                    {products.data.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="inline-actions">
+                    <select value={selectedProductId} onChange={(event) => setSelectedProductId(event.target.value)}>
+                      <option value="">Selecciona un producto</option>
+                      {products.data.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="button button--secondary" onClick={() => setScanModalOpen(true)} type="button">
+                      Escanear código
+                    </button>
+                  </div>
                 </label>
 
                 <label className="field">
@@ -395,7 +505,7 @@ export function SalesPage() {
                   <span>Vender por canasta</span>
                 </label>
 
-                <button className="button button--secondary" onClick={addItem} type="button">
+                <button className="button button--secondary" onClick={() => addItem()} type="button">
                   Agregar item
                 </button>
               </div>
@@ -446,6 +556,15 @@ export function SalesPage() {
             <button className="button button--secondary" onClick={closeModal} type="button">
               {isViewing ? "Cerrar" : "Cancelar"}
             </button>
+            {isViewing && viewedSale && (
+              <button
+                className="button button--primary"
+                onClick={() => printSale(viewedSale)}
+                type="button"
+              >
+                Imprimir factura
+              </button>
+            )}
             {!isViewing && (
               <button className="button button--primary" disabled={items.length === 0} type="submit">
                 Guardar venta
@@ -454,6 +573,14 @@ export function SalesPage() {
           </div>
         </form>
       </Modal>
+
+      <BarcodeScanModal
+        open={scanModalOpen}
+        onClose={() => setScanModalOpen(false)}
+        onDetect={handleSaleScan}
+        initialMode={scannerMode}
+        closeOnDetect={false}
+      />
     </div>
   );
 }

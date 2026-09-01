@@ -1,0 +1,134 @@
+rules_version = '2';
+
+// Reglas de seguridad de Cloud Firestore para "Mi Negocio".
+//
+// Modelo: multiusuario por negocio. Cada negocio vive bajo `businesses/{ownerUid}`.
+// El dueño entra con correo/contraseña; sus empleados con un email sintético
+// (ver `src/shared/services/firebase/employee-provisioning.ts`).
+//
+// Estas reglas garantizan:
+//   - Aislamiento entre negocios (un empleado solo ve/escribe el suyo).
+//   - Que el empleado esté activo (`users/{uid}.isActive != false`).
+//   - Que solo el dueño gestione el doc del negocio y la subcolección `employees`.
+//   - Que un empleado no pueda escalar privilegios editando su propio perfil.
+//
+// La matriz RBAC granular (qué sección/acción puede cada empleado) NO se codifica
+// aquí: se aplica en la capa de presentación (menú, guards de ruta y botones).
+// Ver `src/shared/constants/permissions.ts`.
+//
+// IMPORTANTE: estas reglas se comparten con la app Android hermana. Probar ambas
+// apps contra estas reglas en un proyecto de staging antes de desplegar a prod.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function meRef() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function meExists() {
+      return signedIn() && exists(meRef());
+    }
+
+    function me() {
+      return get(meRef()).data;
+    }
+
+    // Cuentas anteriores a multiusuario no tienen doc `users/{uid}` o no tienen
+    // `role`: se tratan como administrador de su propio negocio.
+    function myRole() {
+      return meExists() ? me().get('role', 'admin') : 'admin';
+    }
+
+    function myActive() {
+      return !meExists() ? true : me().get('isActive', true) == true;
+    }
+
+    function myBusinessId() {
+      return myRole() == 'employee' ? me().get('ownerUid', '') : request.auth.uid;
+    }
+
+    function isMember(bizId) {
+      return signedIn() && myActive() && myBusinessId() == bizId;
+    }
+
+    // ----------------------------- users -----------------------------
+    match /users/{userId} {
+      // El propio usuario, o el dueño de ese empleado.
+      allow get: if signedIn() && (
+        request.auth.uid == userId ||
+        resource.data.get('ownerUid', '') == request.auth.uid
+      );
+      // El dueño puede listar sus empleados.
+      allow list: if signedIn()
+        && resource.data.get('ownerUid', '') == request.auth.uid;
+
+      // Alta del propio perfil de administrador en el registro.
+      allow create: if request.auth.uid == userId
+        && request.resource.data.get('role', 'admin') == 'admin';
+
+      // Alta del doc-espejo de un empleado, hecha por su dueño.
+      allow create: if signedIn()
+        && request.resource.data.get('role', '') == 'employee'
+        && request.resource.data.get('ownerUid', '') == request.auth.uid;
+
+      // Auto-edición: no puede tocar campos sensibles (anti escalada de privilegios).
+      allow update: if request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 'ownerUid', 'employeeId', 'permissions',
+          'loginName', 'loginNameSlug', 'isActive', 'credV', 'syntheticEmail'
+        ]);
+
+      // El dueño administra los docs de sus empleados.
+      allow update, delete: if signedIn()
+        && resource.data.get('role', '') == 'employee'
+        && resource.data.get('ownerUid', '') == request.auth.uid;
+    }
+
+    // --------------------------- businesses --------------------------
+    match /businesses/{bizId} {
+      allow get: if isMember(bizId);
+      allow create, update: if request.auth.uid == bizId;
+      allow delete: if false;
+
+      match /employees/{employeeId} {
+        allow read: if isMember(bizId);
+        allow create, update, delete: if request.auth.uid == bizId;
+      }
+
+      // Colecciones de datos del negocio: dueño o empleado activo.
+      // Se enumeran explícitamente (sin `{document=**}`) para que cualquier
+      // subcolección futura quede denegada por defecto.
+      match /{coll}/{docId} {
+        allow read, write: if isMember(bizId) && coll in [
+          'products', 'sales', 'clients', 'tables',
+          'table_sessions', 'games', 'expenses', 'payments'
+        ];
+      }
+    }
+
+    // -------------------------- businessCodes ------------------------
+    // Reserva de código corto de negocio (unicidad). Se crea una sola vez.
+    match /businessCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete, list: if false;
+    }
+
+    // ---------------------------- empLogins --------------------------
+    // Índice de login del empleado (código + nombre → credV). Necesita lectura
+    // puntual ANTES de autenticar para construir el email sintético; nunca `list`.
+    match /empLogins/{lookupId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if false;
+    }
+  }
+}

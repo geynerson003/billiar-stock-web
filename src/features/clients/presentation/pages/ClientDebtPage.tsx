@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { doc } from "firebase/firestore";
 import { useParams } from "react-router-dom";
 import { PageHeader, Panel } from "../../../../shared/components";
-import { useAuth, useLiveCollection, useLiveDocument, useToast } from "../../../../shared/hooks";
+import { useAsyncAction, useAuth, useBusinessId, useLiveCollection, useLiveDocument, usePermissions, useToast } from "../../../../shared/hooks";
 import {
   businessCollection,
   defaultClient,
@@ -17,9 +17,11 @@ import { formatCurrency, formatDate } from "../../../../shared/utils/format";
 
 export function ClientDebtPage() {
   const { clientId = "" } = useParams();
-  const { user } = useAuth();
+  const { actorId } = useAuth();
+  const { can } = usePermissions();
   const { toast } = useToast();
-  const userId = user?.uid;
+  const { run: runAction } = useAsyncAction();
+  const userId = useBusinessId(); // businessId efectivo (uid del dueño)
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
@@ -68,7 +70,7 @@ export function ClientDebtPage() {
 
   async function payDebt(event: FormEvent) {
     event.preventDefault();
-    if (!userId || !client.data || !amount) return;
+    if (!userId || !client.data || !amount || !can("clients.payments")) return;
 
     const numAmount = Number(amount);
     const maxDebt = debtInfo?.remainingDebt ?? 0;
@@ -78,11 +80,19 @@ export function ClientDebtPage() {
       return;
     }
 
-    await registerPayment(userId, client.data.id, numAmount, description, notes);
-    toast("success", `Pago de ${formatCurrency(numAmount)} registrado`);
-    setAmount("");
-    setDescription("");
-    setNotes("");
+    await runAction(
+      () =>
+        registerPayment(userId, client.data!.id, numAmount, description, notes, actorId ?? undefined),
+      {
+        success: `Pago de ${formatCurrency(numAmount)} registrado`,
+        errorFallbackId: "debt.pay.error",
+        onSuccess: () => {
+          setAmount("");
+          setDescription("");
+          setNotes("");
+        },
+      }
+    );
   }
 
   if (client.loading) {
@@ -139,6 +149,7 @@ export function ClientDebtPage() {
       </div>
 
       <div className="dashboard-grid">
+        {can("clients.payments") && (
         <Panel title="Registrar pago">
           <form className="form-grid" onSubmit={payDebt}>
             <label className="field">
@@ -179,6 +190,7 @@ export function ClientDebtPage() {
             </div>
           </form>
         </Panel>
+        )}
 
         <Panel title="Ventas pendientes">
           <div className="stack-list">

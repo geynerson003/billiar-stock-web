@@ -23,10 +23,15 @@ export interface IUserProfileRepository {
     createProfile(userId: string, profile: UserProfile): Promise<void>;
 
     /**
+     * Actualiza campos del perfil (merge parcial)
+     */
+    updateProfile(userId: string, patch: Partial<UserProfile>): Promise<void>;
+
+    /**
      * Crea documento de negocio asociado
      */
     createBusiness(
         userId: string,
-        data: { initialized: boolean; createdAt: number; businessName: string }
+        data: { initialized: boolean; createdAt: number; businessName: string; market?: string }
     ): Promise<void>;
 }

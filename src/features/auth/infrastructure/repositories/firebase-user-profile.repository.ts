@@ -24,9 +24,13 @@ export class FirebaseUserProfileRepository implements IUserProfileRepository {
         return firebaseUserProfileAPI.createUserProfile(userId, profile);
     }
 
+    async updateProfile(userId: string, patch: Partial<UserProfile>): Promise<void> {
+        return firebaseUserProfileAPI.updateUserProfile(userId, patch);
+    }
+
     async createBusiness(
         userId: string,
-        data: { initialized: boolean; createdAt: number; businessName: string }
+        data: { initialized: boolean; createdAt: number; businessName: string; market?: string }
     ): Promise<void> {
         return firebaseUserProfileAPI.createBusinessProfile(userId, data);
     }

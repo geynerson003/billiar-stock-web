@@ -2,7 +2,8 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
+/** Config de Firebase. Exportada para poder crear una app secundaria en el aprovisionamiento de empleados. */
+export const firebaseConfig = {
   apiKey:
     import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain:

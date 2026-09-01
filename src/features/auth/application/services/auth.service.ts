@@ -11,9 +11,11 @@ import {
     LogoutUseCase,
     RegisterUseCase,
     ResetPasswordUseCase,
+    UpdateProfileUseCase,
     type LoginInput,
     type RegisterInput,
-    type ResetPasswordInput
+    type ResetPasswordInput,
+    type UpdateProfileInput
 } from "../../domain/use-cases";
 
 export class AuthService {
@@ -21,6 +23,7 @@ export class AuthService {
     private registerUseCase: RegisterUseCase;
     private logoutUseCase: LogoutUseCase;
     private resetPasswordUseCase: ResetPasswordUseCase;
+    private updateProfileUseCase: UpdateProfileUseCase;
 
     constructor(
         private authRepository: IUserAuthRepository,
@@ -30,6 +33,7 @@ export class AuthService {
         this.registerUseCase = new RegisterUseCase(authRepository, profileRepository);
         this.logoutUseCase = new LogoutUseCase(authRepository);
         this.resetPasswordUseCase = new ResetPasswordUseCase(authRepository);
+        this.updateProfileUseCase = new UpdateProfileUseCase(profileRepository);
     }
 
     /**
@@ -44,6 +48,13 @@ export class AuthService {
      */
     async register(input: RegisterInput): Promise<User> {
         return this.registerUseCase.execute(input);
+    }
+
+    /**
+     * Actualiza campos del perfil del usuario
+     */
+    async updateProfile(input: UpdateProfileInput): Promise<void> {
+        return this.updateProfileUseCase.execute(input);
     }
 
     /**

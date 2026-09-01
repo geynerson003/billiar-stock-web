@@ -6,6 +6,7 @@ import {
   type Query,
   type QueryDocumentSnapshot
 } from "firebase/firestore";
+import { getErrorMessage } from "../feedback";
 
 export function useLiveCollection<T>(
   buildRef: () => Query<DocumentData> | CollectionReference<DocumentData> | null,
@@ -34,7 +35,7 @@ export function useLiveCollection<T>(
         setLoading(false);
       },
       (snapshotError) => {
-        setError(snapshotError.message);
+        setError(getErrorMessage(snapshotError, { fallbackId: "generic.loadError" }));
         setLoading(false);
       }
     );

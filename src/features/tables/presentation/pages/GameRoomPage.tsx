@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Modal, PageHeader, Panel } from "../../../../shared/components";
-import { useAuth, useLiveCollection, useToast } from "../../../../shared/hooks";
-import type { GameBet, GameParticipant } from "../../../../shared/types";
+import { useAsyncAction, useAuth, useBusinessId, useLiveCollection, useMarket, useNowTick, usePermissions, useTableTimerAlerts, useToast } from "../../../../shared/hooks";
+import type { Game, GameBet, GameParticipant } from "../../../../shared/types";
 import {
   addBetToGame,
   addParticipantsToGame,
@@ -18,14 +18,18 @@ import {
   removeParticipantFromGame,
 } from "../../../../shared/services/firebase/business.service";
 import { calculateGameTotal } from "../../../../shared/utils/financial";
-import { formatCurrency, formatDate } from "../../../../shared/utils/format";
+import { formatCurrency, formatDate, formatDuration } from "../../../../shared/utils/format";
 
 export function GameRoomPage() {
   const navigate = useNavigate();
   const { tableId = "", sessionId = "" } = useParams();
-  const { user } = useAuth();
+  const { actorId } = useAuth();
+  const { can } = usePermissions();
   const { toast } = useToast();
-  const userId = user?.uid;
+  const { run: runAction } = useAsyncAction();
+  const { terms } = useMarket();
+  const canOperate = can("tables.manage");
+  const userId = useBusinessId(); // businessId efectivo (uid del dueño)
 
   const [participantModal, setParticipantModal] = useState(false);
   const [betModal, setBetModal] = useState(false);
@@ -79,10 +83,20 @@ export function GameRoomPage() {
 
   const totalAmount = currentGame ? calculateGameTotal(currentGame) : table?.pricePerGame ?? 0;
 
-  async function startGame() {
-    if (!userId || !table) return;
+  const now = useNowTick();
+  useTableTimerAlerts(currentGame ? [currentGame] : [], () => table?.name ?? "esta mesa");
 
-    await createGame(userId, {
+  const remainingMs =
+    currentGame && currentGame.pricingMode === "TIME" && currentGame.timerDurationMs
+      ? currentGame.startTime + currentGame.timerDurationMs - now
+      : null;
+  const timeIsUp = remainingMs !== null && remainingMs <= 0;
+
+  async function startGame() {
+    if (!userId || !table || !canOperate) return;
+
+    const isTimeMode = table.pricingMode === "TIME";
+    const payload: Omit<Game, "id"> = {
       tableId,
       sessionId,
       startTime: Date.now(),
@@ -95,12 +109,18 @@ export function GameRoomPage() {
       isPaid: false,
       status: "ACTIVE",
       totalAmount: 0,
+      pricingMode: table.pricingMode ?? "GAME",
+      timerDurationMs: isTimeMode ? (table.timerDurationMinutes ?? 0) * 60000 : null,
+    };
+
+    await runAction(() => createGame(userId, payload), {
+      success: `${terms.roomEyebrow} iniciada`,
+      errorFallbackId: "games.create.error",
     });
-    toast("success", "Partida iniciada");
   }
 
   async function saveParticipants() {
-    if (!userId || !currentGame) return;
+    if (!userId || !currentGame || !canOperate) return;
 
     const participants: GameParticipant[] = clients.data
       .filter((client) => selectedParticipantIds.includes(client.id))
@@ -111,14 +131,19 @@ export function GameRoomPage() {
         joinedAt: Date.now(),
       }));
 
-    await addParticipantsToGame(userId, currentGame, participants);
-    toast("success", `${participants.length} participante(s) agregados`);
-    setSelectedParticipantIds([]);
-    setParticipantModal(false);
+    const game = currentGame;
+    await runAction(() => addParticipantsToGame(userId, game, participants), {
+      success: `${participants.length} participante(s) agregados`,
+      errorFallbackId: "games.update.error",
+      onSuccess: () => {
+        setSelectedParticipantIds([]);
+        setParticipantModal(false);
+      },
+    });
   }
 
   async function saveBet() {
-    if (!userId || !currentGame) return;
+    if (!userId || !currentGame || !canOperate) return;
     const product = products.data.find((entry) => entry.id === selectedProductId);
     if (!product) {
       toast("warning", "Selecciona un producto");
@@ -140,41 +165,69 @@ export function GameRoomPage() {
       betByClientIds: [],
     };
 
-    await addBetToGame(userId, currentGame, bet);
-    toast("success", "Apuesta agregada");
-    setSelectedProductId("");
-    setBetQuantityDraft("1");
-    setBetModal(false);
+    const game = currentGame;
+    await runAction(() => addBetToGame(userId, game, bet), {
+      success: "Apuesta agregada",
+      errorFallbackId: "games.update.error",
+      onSuccess: () => {
+        setSelectedProductId("");
+        setBetQuantityDraft("1");
+        setBetModal(false);
+      },
+    });
   }
 
   async function handleRestartGame() {
-    if (!userId || !currentGame) return;
+    if (!userId || !currentGame || !canOperate) return;
 
     if (currentGame.participants.length > 0 && selectedRestartLosers.length === 0) {
       toast("warning", "Marca al menos un perdedor para reiniciar la ronda");
       return;
     }
 
-    await restartGame(userId, currentGame, selectedRestartLosers);
-    toast("success", "Partida reiniciada");
-    setSelectedRestartLosers([]);
-    setRestartModal(false);
+    const game = currentGame;
+    await runAction(() => restartGame(userId, game, selectedRestartLosers), {
+      success: "Partida reiniciada",
+      errorFallbackId: "games.update.error",
+      onSuccess: () => {
+        setSelectedRestartLosers([]);
+        setRestartModal(false);
+      },
+    });
   }
 
   async function closeSession() {
-    if (!userId) return;
+    if (!userId || !canOperate) return;
 
     if (currentGame && currentGame.participants.length > 0 && selectedLosers.length === 0) {
       toast("warning", "Marca al menos un perdedor para la ronda actual");
       return;
     }
 
-    await finishTableSession(userId, sessionGames, currentGame?.id ?? "", selectedLosers, isPaid, products.data, tableId, sessionId);
-    toast("success", "Mesa finalizada cobrando todas las rondas");
-    setSelectedLosers([]);
-    setIsPaid(false);
-    setFinishModal(false);
-    navigate("/tables");
+    await runAction(
+      () =>
+        finishTableSession(
+          userId,
+          sessionGames,
+          currentGame?.id ?? "",
+          selectedLosers,
+          isPaid,
+          products.data,
+          tableId,
+          sessionId,
+          actorId ?? undefined
+        ),
+      {
+        success: "Mesa finalizada cobrando todas las rondas",
+        errorFallbackId: "tables.session.finish.error",
+        onSuccess: () => {
+          setSelectedLosers([]);
+          setIsPaid(false);
+          setFinishModal(false);
+          navigate("/tables");
+        },
+      }
+    );
   }
 
   const finishCandidates = useMemo(() => currentGame?.participants ?? [], [currentGame]);
@@ -182,35 +235,41 @@ export function GameRoomPage() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Partida"
+        eyebrow={terms.roomEyebrow}
         title={table ? `${table.name} · ${formatCurrency(table.pricePerGame)}` : "Mesa"}
         description={
           currentGame
-            ? `Partida activa desde ${formatDate(currentGame.startTime)}`
-            : "Crea una partida y administra participantes, apuestas y perdedores."
+            ? `${terms.roomEyebrow} activa desde ${formatDate(currentGame.startTime)}`
+            : terms.roomEmptyDescription
         }
         actions={
           !currentGame ? (
-            <button className="button button--primary" onClick={() => void startGame()} type="button">
-              Iniciar partida
-            </button>
+            canOperate && (
+              <button className="button button--primary" onClick={() => void startGame()} type="button">
+                {terms.roomStartCta}
+              </button>
+            )
           ) : (
             <div className="inline-actions">
-              <button className="button button--secondary" onClick={() => setParticipantModal(true)} type="button">
-                Agregar participantes
-              </button>
-              <button className="button button--secondary" onClick={() => setBetModal(true)} type="button">
-                Agregar apuesta
-              </button>
               <button className="button button--secondary" onClick={() => setHistoryModal(true)} type="button">
                 Historial
               </button>
-              <button className="button button--secondary" onClick={() => setRestartModal(true)} type="button">
-                Reiniciar
-              </button>
-              <button className="button button--primary" onClick={() => setFinishModal(true)} type="button">
-                Finalizar
-              </button>
+              {canOperate && (
+                <>
+                  <button className="button button--secondary" onClick={() => setParticipantModal(true)} type="button">
+                    Agregar participantes
+                  </button>
+                  <button className="button button--secondary" onClick={() => setBetModal(true)} type="button">
+                    Agregar apuesta
+                  </button>
+                  <button className="button button--secondary" onClick={() => setRestartModal(true)} type="button">
+                    Reiniciar
+                  </button>
+                  <button className="button button--primary" onClick={() => setFinishModal(true)} type="button">
+                    Finalizar
+                  </button>
+                </>
+              )}
             </div>
           )
         }
@@ -222,6 +281,19 @@ export function GameRoomPage() {
         </Panel>
       )}
 
+      {currentGame && remainingMs !== null && (
+        <div className={`timer-banner ${timeIsUp ? "timer-banner--up" : ""}`}>
+          <span>
+            {timeIsUp ? "¡El tiempo de la mesa terminó!" : `Tiempo restante: ${formatDuration(remainingMs)}`}
+          </span>
+          {timeIsUp && (
+            <button className="button button--primary" onClick={() => setRestartModal(true)} type="button">
+              Reiniciar tiempo
+            </button>
+          )}
+        </div>
+      )}
+
       {currentGame && (
         <div className="dashboard-grid">
           <Panel title="Resumen de partida">
@@ -230,6 +302,14 @@ export function GameRoomPage() {
                 <span>Precio base</span>
                 <strong>{formatCurrency(currentGame.pricePerGame)}</strong>
               </div>
+              {remainingMs !== null && (
+                <div className="list-row">
+                  <span>Tiempo restante</span>
+                  <strong className={timeIsUp ? "text-danger" : ""}>
+                    {timeIsUp ? "Tiempo agotado" : formatDuration(remainingMs)}
+                  </strong>
+                </div>
+              )}
               <div className="list-row">
                 <span>Total apuestas</span>
                 <strong>{formatCurrency(currentGame.bets.reduce((sum, bet) => sum + bet.totalPrice, 0))}</strong>
@@ -251,7 +331,7 @@ export function GameRoomPage() {
                   </div>
                   <button
                     className="button button--ghost"
-                    onClick={() => userId && removeParticipantFromGame(userId, currentGame, participant.clientId)}
+                    onClick={() => userId && canOperate && removeParticipantFromGame(userId, currentGame, participant.clientId)}
                     type="button"
                   >
                     Quitar
@@ -278,7 +358,7 @@ export function GameRoomPage() {
                     <strong>{formatCurrency(bet.totalPrice)}</strong>
                     <button
                       className="button button--ghost"
-                      onClick={() => userId && removeBetFromGame(userId, currentGame, index)}
+                      onClick={() => userId && canOperate && removeBetFromGame(userId, currentGame, index)}
                       type="button"
                     >
                       Quitar

@@ -1,17 +1,28 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import {
+  EmployeeLoginPage,
   ForgotPasswordPage,
   LoginPage,
   RegisterPage,
 } from "../../features/auth/presentation/pages";
 import { ClientDebtPage, ClientsPage } from "../../features/clients/presentation/pages";
 import { DashboardPage } from "../../features/dashboard/presentation/pages";
+import { EmployeeDetailPage, EmployeesPage } from "../../features/employees/presentation/pages";
 import { ExpensesPage } from "../../features/expenses/presentation/pages";
 import { InventoryPage } from "../../features/inventory/presentation/pages";
 import { ReportsPage } from "../../features/reports/presentation/pages";
 import { SalesPage } from "../../features/sales/presentation/pages";
+import { SettingsPage } from "../../features/settings/presentation/pages";
 import { GameRoomPage, TablesPage } from "../../features/tables/presentation/pages";
-import { GuestRoute, ProtectedRoute } from "./route-guards";
+import {
+  GuestRoute,
+  MarketFeatureRoute,
+  NoAccessScreen,
+  NotFoundScreen,
+  PermissionRoute,
+  ProtectedRoute,
+} from "./route-guards";
+import { NO_ACCESS_PATH } from "./route-access";
 
 export function AppRoutes() {
   return (
@@ -21,6 +32,14 @@ export function AppRoutes() {
         element={
           <GuestRoute>
             <LoginPage />
+          </GuestRoute>
+        }
+      />
+      <Route
+        path="/staff-login"
+        element={
+          <GuestRoute>
+            <EmployeeLoginPage />
           </GuestRoute>
         }
       />
@@ -42,18 +61,109 @@ export function AppRoutes() {
       />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/inventory" element={<InventoryPage />} />
-        <Route path="/sales" element={<SalesPage />} />
-        <Route path="/clients" element={<ClientsPage />} />
-        <Route path="/clients/:clientId" element={<ClientDebtPage />} />
-        <Route path="/tables" element={<TablesPage />} />
-        <Route path="/tables/:tableId/:sessionId" element={<GameRoomPage />} />
-        <Route path="/expenses" element={<ExpensesPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
+        <Route
+          path="/"
+          element={
+            <PermissionRoute perm="dashboard.view">
+              <DashboardPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/inventory"
+          element={
+            <PermissionRoute perm="inventory.view">
+              <InventoryPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/sales"
+          element={
+            <PermissionRoute perm="sales.view">
+              <SalesPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/clients"
+          element={
+            <PermissionRoute perm="clients.view">
+              <ClientsPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/clients/:clientId"
+          element={
+            <PermissionRoute perm="clients.view">
+              <ClientDebtPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/tables"
+          element={
+            <MarketFeatureRoute feature="tables">
+              <PermissionRoute perm="tables.view">
+                <TablesPage />
+              </PermissionRoute>
+            </MarketFeatureRoute>
+          }
+        />
+        <Route
+          path="/tables/:tableId/:sessionId"
+          element={
+            <MarketFeatureRoute feature="tables">
+              <PermissionRoute perm="tables.view">
+                <GameRoomPage />
+              </PermissionRoute>
+            </MarketFeatureRoute>
+          }
+        />
+        <Route
+          path="/expenses"
+          element={
+            <PermissionRoute perm="expenses.view">
+              <ExpensesPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <PermissionRoute perm="reports.view">
+              <ReportsPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/employees"
+          element={
+            <PermissionRoute perm="ADMIN_ONLY">
+              <EmployeesPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/employees/:employeeId"
+          element={
+            <PermissionRoute perm="ADMIN_ONLY">
+              <EmployeeDetailPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <PermissionRoute perm="ADMIN_ONLY">
+              <SettingsPage />
+            </PermissionRoute>
+          }
+        />
+        <Route path={NO_ACCESS_PATH} element={<NoAccessScreen />} />
+        <Route path="*" element={<NotFoundScreen />} />
       </Route>
-
-      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

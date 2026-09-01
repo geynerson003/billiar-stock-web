@@ -11,6 +11,7 @@ import type {
   Sale,
   SaleItem
 } from "../types/models";
+import { getActiveLocale } from "./format";
 
 function normalizeMillis(input: unknown, fallback = Date.now()): number {
   if (typeof input === "number" && Number.isFinite(input)) return input;
@@ -80,6 +81,16 @@ export function getSaleProfit(sale: Sale, products: Product[]): number {
   }
 
   if (sale.items.length > 0) {
+    const productIds = new Set(products.map((product) => product.id));
+    const allItemsResolvable = sale.items.every((item) => productIds.has(item.productId));
+
+    // Si algún producto de la venta ya no existe, `calculateProfitForDraftItems`
+    // lo omite y subestima la utilidad (pierde también su ingreso). En ese caso
+    // se usa la utilidad congelada al momento de la venta.
+    if (!allItemsResolvable && Number.isFinite(sale.profit) && sale.profit !== 0) {
+      return sale.profit;
+    }
+
     return calculateProfitForDraftItems(sale.items, products);
   }
 
@@ -244,7 +255,7 @@ export function buildDashboardSummary(
         .reduce((sum, expense) => sum + expense.amount, 0);
 
     return {
-      label: date.toLocaleDateString("es-CO", { weekday: "short" }),
+      label: date.toLocaleDateString(getActiveLocale(), { weekday: "short" }),
       value: dayProfit
     };
   });
@@ -257,6 +268,110 @@ export function buildDashboardSummary(
     lowStockAlerts,
     topProducts,
     chartData
+  };
+}
+
+export interface DashboardDeltas {
+  /** % de variación de ingresos (ventas pagadas) últimos 30 días vs. 30 días previos. null si no hay base previa. */
+  incomePct: number | null;
+  /** % de variación de gastos, misma ventana. null si no hay base previa. */
+  expensePct: number | null;
+  /** Margen neto = netProfit / totalIncome * 100 (acumulado). 0 si no hay ingresos. */
+  profitMarginPct: number;
+  /** Nº de clientes con deuda efectiva > 0. */
+  clientsWithDebt: number;
+}
+
+function sumPaidSalesBetween(sales: Sale[], start: number, end: number): number {
+  return sales
+    .filter((sale) => sale.isPaid && sale.date >= start && sale.date <= end)
+    .reduce((sum, sale) => sum + getSaleAmount(sale), 0);
+}
+
+function sumExpensesBetween(expenses: Expense[], start: number, end: number): number {
+  return expenses
+    .filter((expense) => {
+      const millis = getExpenseMillis(expense);
+      return millis >= start && millis <= end;
+    })
+    .reduce((sum, expense) => sum + expense.amount, 0);
+}
+
+export function buildDashboardDeltas(
+  sales: Sale[],
+  expenses: Expense[],
+  products: Product[],
+  clients: Client[],
+  now: number = Date.now()
+): DashboardDeltas {
+  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+  const currentStart = now - THIRTY_DAYS;
+  const previousStart = now - THIRTY_DAYS * 2;
+
+  const currentIncome = sumPaidSalesBetween(sales, currentStart, now);
+  const previousIncome = sumPaidSalesBetween(sales, previousStart, currentStart);
+  const currentExpense = sumExpensesBetween(expenses, currentStart, now);
+  const previousExpense = sumExpensesBetween(expenses, previousStart, currentStart);
+
+  const pctChange = (current: number, previous: number): number | null =>
+    previous > 0 ? ((current - previous) / previous) * 100 : null;
+
+  const summary = buildDashboardSummary(sales, expenses, products, clients);
+  const profitMarginPct =
+    summary.totalIncome > 0 ? (summary.netProfit / summary.totalIncome) * 100 : 0;
+
+  const outstandingDebt = getOutstandingDebtFallback(sales);
+  const clientsWithDebt = clients.filter(
+    (client) =>
+      (client.deuda > 0 ? client.deuda : outstandingDebt.get(client.id) ?? 0) > 0
+  ).length;
+
+  return {
+    incomePct: pctChange(currentIncome, previousIncome),
+    expensePct: pctChange(currentExpense, previousExpense),
+    profitMarginPct,
+    clientsWithDebt
+  };
+}
+
+export interface ProductFinancials {
+  costoUnidad: number;
+  gananciaUnidad: number;
+  margenUnidad: number;
+  ventaPaquete: number;
+  gananciaPaquete: number;
+  margenPaquete: number;
+  valorProveedor: number;
+  valorVenta: number;
+  gananciaPotencial: number;
+}
+
+export function calculateProductFinancials(product: Product): ProductFinancials {
+  const uxp = Math.max(product.unitsPerPackage, 1);
+
+  const costoUnidad = product.supplierPrice / uxp;
+  const gananciaUnidad = product.salePrice - costoUnidad;
+  const margenUnidad =
+    product.salePrice > 0 ? (gananciaUnidad / product.salePrice) * 100 : 0;
+
+  const ventaPaquete = product.saleBasketPrice ?? product.salePrice * uxp;
+  const gananciaPaquete = ventaPaquete - product.supplierPrice;
+  const margenPaquete = ventaPaquete > 0 ? (gananciaPaquete / ventaPaquete) * 100 : 0;
+
+  const valorProveedor = product.stock * costoUnidad;
+  const valorVenta = product.stock * product.salePrice;
+  const gananciaPotencial = valorVenta - valorProveedor;
+
+  return {
+    costoUnidad,
+    gananciaUnidad,
+    margenUnidad,
+    ventaPaquete,
+    gananciaPaquete,
+    margenPaquete,
+    valorProveedor,
+    valorVenta,
+    gananciaPotencial
   };
 }
 
@@ -340,7 +455,9 @@ export function calculateGameTotal(game: Game): number {
 
 export function prepareGameSales(
   game: Game,
-  products: Product[]
+  products: Product[],
+  /** Id del actor que cierra la sesión (`employeeId` o uid del dueño). Por defecto, sistema. */
+  actorId: string = "web-system"
 ): Array<Omit<Sale, "id">> {
   const totalAmount = calculateGameTotal(game);
   if (totalAmount <= 0) return [];
@@ -405,7 +522,7 @@ export function prepareGameSales(
         date: Date.now(),
         tableId: game.tableId,
         type: "TABLE",
-        sellerId: "web-system",
+        sellerId: actorId,
         clientId: "",
         isPaid: game.isPaid,
         isGameSale: true,
@@ -425,7 +542,7 @@ export function prepareGameSales(
     date: Date.now(),
     tableId: game.tableId,
     type: "TABLE" as const,
-    sellerId: "web-system",
+    sellerId: actorId,
     clientId,
     isPaid: game.isPaid,
     isGameSale: true,

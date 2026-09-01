@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Modal, PageHeader, Panel, useConfirmDialog } from "../../../../shared/components";
-import { useAuth, useLiveCollection, useToast } from "../../../../shared/hooks";
+import { Modal, PageHeader, Panel, QueryError, useConfirmDialog } from "../../../../shared/components";
+import { useAsyncAction, useAuth, useBusinessId, useLiveCollection, usePermissions, useToast } from "../../../../shared/hooks";
 import type { Expense } from "../../../../shared/types";
 import {
   addOrUpdateExpense,
@@ -36,20 +36,24 @@ function expenseToDraft(expense: Expense): ExpenseDraft {
   };
 }
 
-function draftToExpense(draft: ExpenseDraft): Expense {
+function draftToExpense(draft: ExpenseDraft, actorId?: string | null): Expense {
   return {
     id: draft.id,
     description: draft.description.trim(),
     amount: Number(draft.amount || 0),
     category: draft.category.trim() || "General",
     date: draft.date,
+    // La autoría se fija solo al crear; en la edición `addOrUpdateExpense` no la toca.
+    ...(!draft.id && actorId ? { createdBy: actorId } : {}),
   };
 }
 
 export function ExpensesPage() {
-  const { user } = useAuth();
+  const { actorId } = useAuth();
+  const { can } = usePermissions();
   const { toast } = useToast();
-  const userId = user?.uid;
+  const { run: runAction } = useAsyncAction();
+  const userId = useBusinessId(); // businessId efectivo (uid del dueño)
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<ExpenseDraft>(blankExpenseDraft);
@@ -101,6 +105,7 @@ export function ExpensesPage() {
   async function saveExpense(event: FormEvent) {
     event.preventDefault();
     if (!userId) return;
+    if (!can(draft.id ? "expenses.edit" : "expenses.create")) return;
 
     if (!draft.description.trim()) {
       toast("warning", "La descripción es obligatoria");
@@ -113,21 +118,25 @@ export function ExpensesPage() {
       return;
     }
 
-    await addOrUpdateExpense(userId, draftToExpense(draft));
-    toast("success", draft.id ? "Gasto actualizado" : "Gasto registrado con éxito");
-    closeModal();
+    await runAction(() => addOrUpdateExpense(userId, draftToExpense(draft, actorId)), {
+      success: draft.id ? "Gasto actualizado" : "Gasto registrado con éxito",
+      errorFallbackId: "expenses.save.error",
+      onSuccess: closeModal,
+    });
   }
 
   async function removeExpense(expenseId: string) {
-    if (!userId) return;
+    if (!userId || !can("expenses.delete")) return;
     const confirmed = await confirm({
       title: "Eliminar gasto",
       message: "¿Estás seguro de eliminar este gasto?",
       confirmLabel: "Eliminar",
     });
     if (!confirmed) return;
-    await deleteExpense(userId, expenseId);
-    toast("success", "Gasto eliminado");
+    await runAction(() => deleteExpense(userId, expenseId), {
+      success: "expenses.delete.success",
+      errorFallbackId: "expenses.delete.error",
+    });
   }
 
   return (
@@ -146,12 +155,16 @@ export function ExpensesPage() {
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Buscar gasto…"
             />
-            <button className="button button--primary" onClick={openCreate} type="button">
-              Nuevo gasto
-            </button>
+            {can("expenses.create") && (
+              <button className="button button--primary" onClick={openCreate} type="button">
+                Nuevo gasto
+              </button>
+            )}
           </div>
         }
       />
+
+      <QueryError error={expenses.error} />
 
       <Panel title="Historial de egresos" subtitle={`${filteredExpenses.length} movimientos`}>
         <div className="stack-list">
@@ -168,12 +181,16 @@ export function ExpensesPage() {
               </div>
               <div className="inline-actions">
                 <strong>{formatCurrency(expense.amount)}</strong>
-                <button className="button button--secondary" onClick={() => openEdit(expense)} type="button">
-                  Editar
-                </button>
-                <button className="button button--ghost" onClick={() => void removeExpense(expense.id)} type="button">
-                  Eliminar
-                </button>
+                {can("expenses.edit") && (
+                  <button className="button button--secondary" onClick={() => openEdit(expense)} type="button">
+                    Editar
+                  </button>
+                )}
+                {can("expenses.delete") && (
+                  <button className="button button--ghost" onClick={() => void removeExpense(expense.id)} type="button">
+                    Eliminar
+                  </button>
+                )}
               </div>
             </div>
           ))}

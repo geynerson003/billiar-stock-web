@@ -5,6 +5,7 @@ import {
   type DocumentReference,
   type DocumentSnapshot
 } from "firebase/firestore";
+import { getErrorMessage } from "../feedback";
 
 export function useLiveDocument<T>(
   buildRef: () => DocumentReference<DocumentData> | null,
@@ -33,7 +34,7 @@ export function useLiveDocument<T>(
         setLoading(false);
       },
       (snapshotError) => {
-        setError(snapshotError.message);
+        setError(getErrorMessage(snapshotError, { fallbackId: "generic.loadError" }));
         setLoading(false);
       }
     );

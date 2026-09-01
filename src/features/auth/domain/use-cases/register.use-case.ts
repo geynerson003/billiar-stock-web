@@ -20,6 +20,10 @@ export interface RegisterInput {
     email: string;
     password: string;
     businessName: string;
+    /** Código ISO-3166 alpha-2 del país elegido en el registro. */
+    country: string;
+    /** Tipo de negocio elegido en el registro (ver `src/shared/constants/markets.ts`). */
+    market: string;
 }
 
 export class RegisterUseCase {
@@ -39,6 +43,8 @@ export class RegisterUseCase {
                 uid: user.uid,
                 email: input.email,
                 businessName: input.businessName,
+                country: input.country,
+                market: input.market,
                 createdAt: Date.now()
             };
 
@@ -48,7 +54,8 @@ export class RegisterUseCase {
             await this.profileRepository.createBusiness(user.uid, {
                 initialized: true,
                 createdAt: Date.now(),
-                businessName: input.businessName
+                businessName: input.businessName,
+                market: input.market
             });
 
             return user;

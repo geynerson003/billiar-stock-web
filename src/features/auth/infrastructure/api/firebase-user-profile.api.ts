@@ -46,11 +46,22 @@ export class FirebaseUserProfileAPI {
     }
 
     /**
+     * Actualiza campos del perfil de usuario (merge parcial)
+     */
+    async updateUserProfile(
+        userId: string,
+        patch: Partial<UserProfile>
+    ): Promise<void> {
+        const userDocRef = firebaseFirestoreService.getUserDoc<UserProfile>(userId);
+        await firebaseFirestoreService.updateDoc(userDocRef, patch);
+    }
+
+    /**
      * Crea documento de negocio
      */
     async createBusinessProfile(
         userId: string,
-        data: { initialized: boolean; createdAt: number; businessName: string }
+        data: { initialized: boolean; createdAt: number; businessName: string; market?: string }
     ): Promise<void> {
         const businessDocRef = firebaseFirestoreService.getBusinessProfileDoc(userId);
         await firebaseFirestoreService.setDoc(businessDocRef, data);

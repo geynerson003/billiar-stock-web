@@ -8,16 +8,16 @@
     />
 
     <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#0d6efd" />
+    <meta name="theme-color" content="#c2410c" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Billiard Stock" />
+    <meta name="apple-mobile-web-app-title" content="Mi Negocio" />
     <meta name="mobile-web-app-capable" content="yes" />
 
     <!-- SEO Meta Tags -->
     <meta
       name="description"
-      content="Billiard Stock — App profesional para gestionar inventario, ventas, clientes, mesas y reportes de tu billar. Control total del negocio."
+      content="Mi Negocio — App profesional para gestionar inventario, ventas, clientes, deudas y reportes de tu negocio. Bares, restaurantes, tiendas y más."
     />
 
     <!-- PWA Manifest & Icons -->
@@ -25,15 +25,16 @@
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
-    <!-- Google Fonts — Inter (Modern, clean, highly legible) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
-      rel="stylesheet"
-    />
+    <title>Mi Negocio — Control Total del Negocio</title>
 
-    <title>Billiard Stock — Control Total del Negocio</title>
+    <!-- Aplica el tema guardado antes del primer paint, para evitar parpadeo -->
+    <script>
+      try {
+        if (localStorage.getItem("mi-negocio-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

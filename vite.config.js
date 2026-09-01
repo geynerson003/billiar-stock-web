@@ -30,9 +30,9 @@ export default defineConfig({
             },
             manifest: {
                 id: "/",
-                name: "Billiard Stock — Control Total del Negocio",
-                short_name: "Billiard Stock",
-                description: "App profesional para gestionar inventario, ventas, clientes, mesas y reportes de tu billar.",
+                name: "Mi Negocio — Control Total del Negocio",
+                short_name: "Negocio",
+                description: "App profesional para gestionar inventario, ventas, clientes, deudas y reportes de tu negocio.",
                 start_url: "/",
                 display: "standalone",
                 orientation: "any",

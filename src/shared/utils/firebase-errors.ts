@@ -56,6 +56,24 @@ const firestoreErrors: Record<string, string> = {
     "El servicio no está disponible. Verifica tu conexión e intenta de nuevo.",
   "deadline-exceeded":
     "La operación tardó demasiado. Intenta de nuevo.",
+  "failed-precondition":
+    "No se puede completar la operación en este momento. Recarga la página e intenta de nuevo.",
+  "aborted":
+    "La operación se canceló por un conflicto. Intenta de nuevo.",
+  "cancelled":
+    "La operación fue cancelada.",
+  "invalid-argument":
+    "Algunos datos no son válidos. Revísalos e intenta de nuevo.",
+  "out-of-range":
+    "Un valor está fuera del rango permitido.",
+  "unauthenticated":
+    "Tu sesión expiró. Inicia sesión nuevamente.",
+  "data-loss":
+    "Se perdieron datos durante la operación. Intenta de nuevo.",
+  "unimplemented":
+    "Esta operación no está disponible.",
+  "unknown":
+    "Ocurrió un error desconocido. Intenta de nuevo.",
 };
 
 /**

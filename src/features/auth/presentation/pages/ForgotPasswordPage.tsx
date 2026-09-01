@@ -42,7 +42,7 @@ export function ForgotPasswordPage() {
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="negocio@billar.com"
+            placeholder="tu@negocio.com"
             autoComplete="email"
           />
         </label>

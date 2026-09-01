@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { useAuth, usePWAInstall } from "../../shared/hooks";
-import { ReloadPrompt } from "../../shared/components/common";
+import { useAuth, useMarket, usePermissions, usePWAInstall, useTheme } from "../../shared/hooks";
+import { APP_BRAND_NAME } from "../../shared/constants";
+import type { Permission } from "../../shared/constants";
+import { ErrorBoundary, ReloadPrompt } from "../../shared/components/common";
 
 /* ── SVG Icons (inline for zero-dependency, tree-shakeable) ── */
 const icons = {
@@ -44,6 +46,12 @@ const icons = {
       <path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" />
     </svg>
   ),
+  settings: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+  ),
   menu: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" />
@@ -61,24 +69,42 @@ const icons = {
   ),
 };
 
-const navItems = [
-  { to: "/", label: "Dashboard", icon: icons.dashboard },
-  { to: "/inventory", label: "Inventario", icon: icons.inventory },
-  { to: "/sales", label: "Ventas", icon: icons.sales },
-  { to: "/clients", label: "Clientes", icon: icons.clients },
-  { to: "/tables", label: "Mesas", icon: icons.tables },
-  { to: "/expenses", label: "Gastos", icon: icons.expenses },
-  { to: "/reports", label: "Reportes", icon: icons.reports },
-];
-
-/** Items shown in the bottom navigation (limited for mobile) */
-const bottomNavItems = navItems.slice(0, 5); // Dashboard, Inventario, Ventas, Clientes, Mesas
-
 export function AppShell() {
   const { logout, profile, user } = useAuth();
+  const market = useMarket();
+  const { can, isAdmin } = usePermissions();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { isInstallable, promptInstall } = usePWAInstall();
+  const { isDark, toggleTheme } = useTheme();
+
+  /**
+   * Menú lateral: adaptado al mercado (label y visibilidad de "Mesas") y
+   * filtrado por permisos del actor. El admin ve todo; "Empleados" y "Ajustes"
+   * son exclusivos del admin.
+   */
+  const navItems = useMemo(() => {
+    type NavItem = { to: string; label: string; icon: ReactNode; perm: Permission | "__admin" };
+    const items: NavItem[] = [
+      { to: "/", label: "Dashboard", icon: icons.dashboard, perm: "dashboard.view" },
+      { to: "/inventory", label: "Inventario", icon: icons.inventory, perm: "inventory.view" },
+      { to: "/sales", label: "Ventas", icon: icons.sales, perm: "sales.view" },
+      { to: "/clients", label: "Clientes", icon: icons.clients, perm: "clients.view" },
+      ...(market.features.tables
+        ? [{ to: "/tables", label: market.terms.tablesNav, icon: icons.tables, perm: "tables.view" as const }]
+        : []),
+      { to: "/expenses", label: "Gastos", icon: icons.expenses, perm: "expenses.view" },
+      { to: "/reports", label: "Reportes", icon: icons.reports, perm: "reports.view" },
+      { to: "/employees", label: "Empleados", icon: icons.clients, perm: "__admin" },
+      { to: "/settings", label: "Ajustes", icon: icons.settings, perm: "__admin" },
+    ];
+    return items.filter((item) =>
+      item.perm === "__admin" ? isAdmin : can(item.perm)
+    );
+  }, [market, can, isAdmin]);
+
+  /** Items de la barra inferior móvil (máx. 5). */
+  const bottomNavItems = useMemo(() => navItems.slice(0, 5), [navItems]);
 
   /* Close drawer on navigation */
   useEffect(() => {
@@ -108,8 +134,8 @@ export function AppShell() {
       {/* ── Mobile Header ── */}
       <header className="mobile-header">
         <div className="mobile-header__brand">
-          <img src="/icons/navbar-icon-32x32.png" alt="Logo" style={{ width: '44px', height: '44px', borderRadius: '50%', objectFit: 'cover' }} />
-          <strong>Billiard Stock</strong>
+          <img src="/icons/navbar-icon-32x32.png" alt="Logo" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
+          <strong>{APP_BRAND_NAME}</strong>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {isInstallable && (
@@ -142,10 +168,10 @@ export function AppShell() {
       {/* ── Sidebar / Drawer ── */}
       <aside className={`sidebar ${drawerOpen ? "sidebar--open" : ""}`}>
         <div className="brand">
-          <img src="/icons/navbar-icon-32x32.png" alt="Logo" style={{ width: '44px', height: '44px', borderRadius: '50%', objectFit: 'cover' }} />
+          <img src="/icons/navbar-icon-32x32.png" alt="Logo" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
           <div>
-            <strong>Billiard Stock</strong>
-            <span>Control total del negocio</span>
+            <strong>{APP_BRAND_NAME}</strong>
+            <span>{market.brandTagline}</span>
             <span style={{ fontSize: "0.65rem", opacity: 0.5, marginTop: "2px", display: "block" }}>
               v{__APP_VERSION__}
             </span>
@@ -168,11 +194,23 @@ export function AppShell() {
           ))}
         </nav>
 
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={toggleTheme}
+          aria-pressed={isDark}
+        >
+          <span>{isDark ? "Modo oscuro" : "Modo claro"}</span>
+          <span className="theme-toggle__switch" data-checked={isDark}>
+            <span className="theme-toggle__thumb" />
+          </span>
+        </button>
+
         <div className="sidebar__profile">
           <strong>{profile?.businessName ?? "Mi negocio"}</strong>
           <span>{user?.email}</span>
           <button
-            className="button button--secondary button--full"
+            className="button button--full"
             onClick={() => void logout()}
             type="button"
           >
@@ -184,7 +222,13 @@ export function AppShell() {
 
       {/* ── Main Content ── */}
       <main className="content">
-        <Outlet />
+        <ErrorBoundary
+          level="content"
+          resetKeys={[location.pathname]}
+          onLogout={() => void logout()}
+        >
+          <Outlet />
+        </ErrorBoundary>
       </main>
 
       {/* ── Bottom Navigation (mobile only) ── */}

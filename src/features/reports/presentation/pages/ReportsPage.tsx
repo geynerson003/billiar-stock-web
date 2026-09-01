@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { PageHeader, Panel } from "../../../../shared/components";
-import { useAuth, useLiveCollection } from "../../../../shared/hooks";
+import { useBusinessId, useLiveCollection, useMarket } from "../../../../shared/hooks";
 import type { ReportFilter, ReportType } from "../../../../shared/types";
 import {
   businessCollection,
@@ -14,8 +14,8 @@ import { buildReport } from "../../../../shared/utils/financial";
 import { formatCurrency } from "../../../../shared/utils/format";
 
 export function ReportsPage() {
-  const { user } = useAuth();
-  const userId = user?.uid;
+  const market = useMarket();
+  const userId = useBusinessId(); // businessId efectivo (uid del dueño)
   const [filterType, setFilterType] = useState<ReportType>("DAILY");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -115,19 +115,21 @@ export function ReportsPage() {
       </div>
 
       <div className="dashboard-grid">
-        <Panel title="Ventas por mesa">
-          <div className="stack-list">
-            {Object.entries(report.salesByTable).map(([table, value]) => (
-              <div className="list-row" key={table}>
-                <span>{table}</span>
-                <strong>{formatCurrency(value)}</strong>
-              </div>
-            ))}
-            {Object.keys(report.salesByTable).length === 0 && (
-              <div className="empty-state">No hay ventas por mesa para el periodo seleccionado.</div>
-            )}
-          </div>
-        </Panel>
+        {market.features.tables && (
+          <Panel title={market.terms.reportsByTableTitle}>
+            <div className="stack-list">
+              {Object.entries(report.salesByTable).map(([table, value]) => (
+                <div className="list-row" key={table}>
+                  <span>{table}</span>
+                  <strong>{formatCurrency(value)}</strong>
+                </div>
+              ))}
+              {Object.keys(report.salesByTable).length === 0 && (
+                <div className="empty-state">{market.terms.reportsByTableEmpty}</div>
+              )}
+            </div>
+          </Panel>
+        )}
 
         <Panel title="Ventas por producto">
           <div className="stack-list">

@@ -40,7 +40,7 @@ export interface AuthContextValue {
   actorId: string | null;
   /** Permisos concedidos al empleado. Vacío para el admin (tiene todo implícito). */
   permissions: string[];
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (
     email: string,
     password: string,
@@ -116,8 +116,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       employeeId,
       actorId,
       permissions,
-      login: async (email, password) => {
-        await authService.login({ email, password });
+      login: async (email, password, rememberMe = true) => {
+        await authService.login({ email, password, rememberMe });
       },
       register: async (email, password, businessName, country, market) => {
         await authService.register({ email, password, businessName, country, market });

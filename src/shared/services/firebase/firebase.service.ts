@@ -29,9 +29,12 @@ import {
   type QueryConstraint
 } from "firebase/firestore";
 import {
+  browserLocalPersistence,
+  browserSessionPersistence,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
   type User
@@ -41,7 +44,18 @@ import {
  * Firebase Auth Service
  */
 export class FirebaseAuthService {
-  async login(email: string, password: string): Promise<User> {
+  /**
+   * Inicia sesión con email y contraseña.
+   *
+   * @param rememberMe `true` (por defecto) mantiene la sesión entre visitas
+   *   (`browserLocalPersistence`); `false` la limita a la pestaña actual y la
+   *   borra al cerrarla (`browserSessionPersistence`).
+   */
+  async login(email: string, password: string, rememberMe = true): Promise<User> {
+    await setPersistence(
+      auth,
+      rememberMe ? browserLocalPersistence : browserSessionPersistence
+    );
     const credentials = await signInWithEmailAndPassword(auth, email, password);
     return credentials.user;
   }

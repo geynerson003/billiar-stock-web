@@ -13,9 +13,11 @@ export interface IUserAuthRepository {
     register(email: string, password: string): Promise<User>;
 
     /**
-     * Inicia sesión con email y contraseña
+     * Inicia sesión con email y contraseña.
+     * `rememberMe` (por defecto `true`) decide si la sesión persiste entre
+     * visitas o solo dura mientras la pestaña esté abierta.
      */
-    login(email: string, password: string): Promise<User>;
+    login(email: string, password: string, rememberMe?: boolean): Promise<User>;
 
     /**
      * Cierra la sesión actual

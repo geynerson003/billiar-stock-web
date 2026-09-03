@@ -7,8 +7,8 @@ import type { User } from "firebase/auth";
 import { firebaseAuthService } from "../../../../shared/services";
 
 export class FirebaseAuthAPI {
-    async login(email: string, password: string): Promise<User> {
-        return firebaseAuthService.login(email, password);
+    async login(email: string, password: string, rememberMe = true): Promise<User> {
+        return firebaseAuthService.login(email, password, rememberMe);
     }
 
     async register(email: string, password: string): Promise<User> {

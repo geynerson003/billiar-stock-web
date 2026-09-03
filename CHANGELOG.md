@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v2.0.0...billiard-stock-web-v2.1.0) (2026-09-03)
+
+
+### Features
+
+* **auth:** opción "Recuérdame" para elegir la persistencia de sesión ([5c1cb78](https://github.com/geynerson003/billiar-stock-web/commit/5c1cb78bfcab46ac0c708b74525b7aeb4328c6cf))
+* escáner mejorado y "Recuérdame" en login ([fe2c20d](https://github.com/geynerson003/billiar-stock-web/commit/fe2c20d29796697822b514144431ad323189d5d8))
+* **scanner:** acelera y da feedback visual al escáner de código de barras ([4a045cd](https://github.com/geynerson003/billiar-stock-web/commit/4a045cd357e3632c79b91052e02bd926da542f11))
+
 ## [2.0.0](https://github.com/geynerson003/billiar-stock-web/compare/billiard-stock-web-v1.3.1...billiard-stock-web-v2.0.0) (2026-09-01)
 
 

@@ -15,6 +15,11 @@ interface BarcodeScanModalProps {
   title?: string;
 }
 
+/** Evita re-emitir el mismo código varias veces por segundo en modo continuo. */
+const SAME_CODE_COOLDOWN_MS = 1500;
+
+type ScanStatus = "searching" | "found";
+
 function describeCameraError(error: unknown): string {
   const name = error instanceof Error ? error.name : "";
   switch (name) {
@@ -47,10 +52,12 @@ export function BarcodeScanModal({
   const { toast } = useToast();
   const [mode, setMode] = useState<ScannerModeId>(initialMode);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<ScanStatus>("searching");
   const [hidValue, setHidValue] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hidInputRef = useRef<HTMLInputElement | null>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
+  const lastDetectionRef = useRef<{ code: string; at: number } | null>(null);
 
   /* Al reabrir el modal, vuelve al modo configurado por defecto. */
   useEffect(() => {
@@ -61,6 +68,8 @@ export function BarcodeScanModal({
     if (!open) {
       setHidValue("");
       setCameraError(null);
+      setScanStatus("searching");
+      lastDetectionRef.current = null;
     }
   }, [open]);
 
@@ -70,20 +79,72 @@ export function BarcodeScanModal({
     if (!open || mode !== "camera") return;
 
     let cancelled = false;
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
     setCameraError(null);
+    setScanStatus("searching");
+
+    function handleDetection(rawCode: string) {
+      const code = rawCode.trim();
+      if (!code) return;
+
+      const now = Date.now();
+      const last = lastDetectionRef.current;
+      if (last && last.code === code && now - last.at < SAME_CODE_COOLDOWN_MS) return;
+      lastDetectionRef.current = { code, at: now };
+
+      setScanStatus("found");
+      onDetect(code);
+
+      if (closeOnDetect) {
+        onClose();
+        return;
+      }
+
+      /* Modo continuo: vuelve a "buscando" tras el destello verde. */
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        if (!cancelled) setScanStatus("searching");
+      }, 900);
+    }
 
     async function startCamera() {
       try {
-        const { BrowserMultiFormatReader } = await import("@zxing/browser");
-        const reader = new BrowserMultiFormatReader();
-        const controls = await reader.decodeFromVideoDevice(
-          undefined,
+        const [{ BrowserMultiFormatReader }, { DecodeHintType, BarcodeFormat }] = await Promise.all([
+          import("@zxing/browser"),
+          import("@zxing/library"),
+        ]);
+
+        /* Restringir formatos a códigos de producto acelera bastante la
+           decodificación (ZXing deja de probar simbologías irrelevantes). */
+        const hints = new Map<number, unknown>();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.ITF,
+          BarcodeFormat.CODABAR,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+
+        const reader = new BrowserMultiFormatReader(hints, {
+          delayBetweenScanAttempts: 100,
+          delayBetweenScanSuccess: SAME_CODE_COOLDOWN_MS,
+        });
+
+        const controls = await reader.decodeFromConstraints(
+          {
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          },
           videoRef.current ?? undefined,
           (result) => {
-            if (result && !cancelled) {
-              onDetect(result.getText());
-              if (closeOnDetect) onClose();
-            }
+            if (result && !cancelled) handleDetection(result.getText());
           }
         );
 
@@ -101,6 +162,7 @@ export function BarcodeScanModal({
 
     return () => {
       cancelled = true;
+      if (resetTimer) clearTimeout(resetTimer);
       controlsRef.current?.stop();
       controlsRef.current = null;
     };
@@ -127,6 +189,9 @@ export function BarcodeScanModal({
     toast("info", "Cambiado a modo lector físico.");
   }
 
+  const found = scanStatus === "found";
+  const feedbackColor = found ? "var(--green)" : "var(--red)";
+
   return (
     <Modal open={open} title={title} onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -145,24 +210,64 @@ export function BarcodeScanModal({
           ))}
         </div>
 
-        {mode === "camera" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              style={{ width: "100%", borderRadius: "var(--radius-sm, 8px)", background: "#000" }}
-            />
-            {cameraError && (
-              <div className="empty-state">
-                <p>{cameraError}</p>
-                <button className="button button--secondary" type="button" onClick={handleCameraFallback}>
-                  Usar lector físico
-                </button>
+        {mode === "camera" &&
+          (cameraError ? (
+            <div className="empty-state">
+              <p>{cameraError}</p>
+              <button className="button button--secondary" type="button" onClick={handleCameraFallback}>
+                Usar lector físico
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", alignItems: "center" }}>
+              <div
+                style={{
+                  position: "relative",
+                  width: "100%",
+                  maxWidth: "320px",
+                  aspectRatio: "5 / 2",
+                  overflow: "hidden",
+                  borderRadius: "var(--radius-sm, 8px)",
+                  background: "#000",
+                  border: `3px solid ${feedbackColor}`,
+                  boxShadow: found ? "0 0 0 4px rgba(31, 111, 74, 0.3)" : "none",
+                  transition: "border-color 150ms ease, box-shadow 150ms ease",
+                }}
+              >
+                <video
+                  ref={videoRef}
+                  muted
+                  playsInline
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+                <div
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    left: "8%",
+                    right: "8%",
+                    top: "50%",
+                    height: "2px",
+                    transform: "translateY(-50%)",
+                    background: feedbackColor,
+                    opacity: 0.9,
+                    transition: "background 150ms ease",
+                  }}
+                />
               </div>
-            )}
-          </div>
-        )}
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.85rem",
+                  fontWeight: 600,
+                  color: feedbackColor,
+                  transition: "color 150ms ease",
+                }}
+              >
+                {found ? "✓ Código detectado" : "Buscando código…"}
+              </p>
+            </div>
+          ))}
 
         {mode === "hid" && (
           <label className="field">

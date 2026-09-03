@@ -12,8 +12,8 @@ export class FirebaseUserAuthRepository implements IUserAuthRepository {
         return firebaseAuthAPI.register(email, password);
     }
 
-    async login(email: string, password: string): Promise<User> {
-        return firebaseAuthAPI.login(email, password);
+    async login(email: string, password: string, rememberMe = true): Promise<User> {
+        return firebaseAuthAPI.login(email, password, rememberMe);
     }
 
     async logout(): Promise<void> {

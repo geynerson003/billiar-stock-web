@@ -11,6 +11,7 @@ export function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isInstallable, promptInstall } = usePWAInstall();
@@ -21,7 +22,7 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      await login(email, password);
+      await login(email, password, rememberMe);
       navigate("/");
     } catch (submitError) {
       setError(
@@ -108,6 +109,16 @@ export function LoginPage() {
           placeholder="Tu contraseña"
           autoComplete="current-password"
         />
+
+        <label className="toggle" htmlFor="login-remember">
+          <input
+            id="login-remember"
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(event) => setRememberMe(event.target.checked)}
+          />
+          <span>Recuérdame en este dispositivo</span>
+        </label>
 
         {error && <div className="alert alert--error">{error}</div>}
 
